@@ -1,6 +1,6 @@
 import streamlit as st
 st.set_page_config(page_title="DJ Tool", layout="wide")
-st.warning("⚠️ Bitte immer über app_modular.py bzw. die V9.6 Start-BAT starten.")
+st.warning("⚠️ Bitte immer über app_modular.py bzw. die aktuelle V10.1 Start-BAT starten.")
 st.stop()
 
 def render_quick_backup_button():
@@ -65,7 +65,7 @@ logging.getLogger("streamlit").setLevel(logging.ERROR)
 APP_VERSION = "DJ Tool V152 - Performance Guard"
 APP_SHORT_VERSION = "V152"
 APP_BUILD_DATE = "2026-04-04"
-APP_BUILD_TIME = "11:21"
+APP_BUILD_TIME = "11:20"
 APP_BUILD_SOURCE = "V151 + performance guard + lazy backup + DB signature caches + SQL indexes"
 APP_BASELINE_ID = "djtool_master_baseline_v1"
 LOGIN_ENABLED = True

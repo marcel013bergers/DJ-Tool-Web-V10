@@ -6,7 +6,7 @@
   "stable_app_exists": true,
   "live_playlists": 402,
   "live_tracks": 30726,
-  "selected_source": "backup_zip",
+  "selected_source": "live_existing",
   "notes": [
     "Live Datenbestand ist vorhanden"
   ]

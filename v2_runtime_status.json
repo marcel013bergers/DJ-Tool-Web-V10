@@ -12,8 +12,8 @@
   "backup_zip": "D:\\Professional DJ team Dropbox\\Marcel Bergers\\ChatCPT_DJ_System\\DJ_Nachbarschaftstool\\DJ Tool Web V10\\dj_tool_backup_2026-04-02_20-12.zip",
   "backup_playlists": 402,
   "backup_tracks": 30726,
-  "copied_db": true,
+  "copied_db": false,
   "copied_sets": false,
-  "restored_from_backup": true,
-  "selected_source": "backup_zip"
+  "restored_from_backup": false,
+  "selected_source": "live_existing"
 }

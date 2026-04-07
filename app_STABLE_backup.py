@@ -55,11 +55,11 @@ import urllib.parse
 warnings.filterwarnings("ignore")
 logging.getLogger("streamlit").setLevel(logging.ERROR)
 
-APP_VERSION = "DJ Tool V10 - Abschlussversion"
-APP_SHORT_VERSION = "V10"
+APP_VERSION = "DJ Tool DJ Tool V10.1.3 - SQL Fix Komplettversion"
+APP_SHORT_VERSION = "V10.1.3"
 APP_BUILD_DATE = "2026-04-04"
-APP_BUILD_TIME = "22:10"
-APP_BUILD_SOURCE = "V9.9 komplett + V10 Abschluss-Polish mit Einfach/Profi, Schnell-Workflow und Kompaktmodus"
+APP_BUILD_TIME = "13:55"
+APP_BUILD_SOURCE = "V10 Basis + korrigierter Runtime-Pfad für zuletzt importierte Playlists"
 APP_BASELINE_ID = "djtool_master_baseline_v1"
 LOGIN_ENABLED = True
 AUTO_LOGIN_TRUSTED_DEVICE = True
@@ -71,6 +71,9 @@ RELEASE_GUARD_AUTO_WRITE = True
 REQUIRE_SAFE_STORAGE_FOR_IMPORTS = True
 
 BUILD_NOTES = [
+    "V10.1.3 fixt die zuletzt importierten Playlists für bestehende Datenbanken ohne playlist_id in import_runs",
+    "V10.1 zeigt zuletzt importierte Playlists global mit 10/20/50 Auswahl",
+    "V10.1 erlaubt direktes Öffnen und Analysieren aus der Import-Historie",
     "V10 ergänzt Einfach/Profi-Modus für klareren Einstieg ohne DJ-Logik-Verlust",
     "V10 bringt Schnell-Workflow für Event -> Stil -> Auto-Set in wenigen Klicks",
     "V10 ergänzt Kompaktmodus für ruhigere Nutzung am iPad",
@@ -111,6 +114,8 @@ BUILD_NOTES = [
 ]
 
 CHANGELOG = [
+    {"version": "V10.1.3", "date": "2026-04-07", "new": ["Zuletzt importierte Playlists global", "Direkt öffnen/analysieren", "10/20/50 Auswahl"], "fixes": ["SQL-Fix für bestehende import_runs Tabellen ohne playlist_id", "klare Versionsanzeige", "sichtbarer Menüpunkt im Live-Pfad"]},
+    {"version": "V10.1", "date": "2026-04-07", "new": ["Zuletzt importierte Playlists global", "Direkt öffnen", "Direkt analysieren"], "fixes": ["letzte 10/20/50 sichtbar", "Import-Historie dauerhaft nutzbar", "schneller Rücksprung zu Browser/Analyse Hub"]},
     {"version": "V10", "date": "2026-04-04", "new": ["Einfach/Profi-Modus", "Schnell-Workflow", "Kompaktmodus"], "fixes": ["klarerer Einstieg", "ruhigere Sidebar", "Abschlussversion mit sichtbarer V10-Kennung"]},
     {"version": "V9.9", "date": "2026-04-04", "new": ["konkretere Bereichs-Hilfe", "Lernprinzipien sichtbar", "Confidence-Legende"], "fixes": ["Hilfetexte praxisnäher", "KI-Erklärungen verständlicher", "gleiche UI mit mehr Orientierung"]},
     {"version": "V9.5", "date": "2026-04-04", "new": ["Meta-Option-Caches", "Sequence-Cache für Dubletten", "robustere Start-BAT"], "fixes": ["weniger gleiche DB-Abfragen", "ruhigere Dubletten-Suche", "Browser öffnet lokaler zuverlässiger"]},
@@ -141,6 +146,7 @@ FEATURE_MANIFEST = {
     "upload_feedback": "Upload-Komplett-Meldung",
     "playlist_cards": "Bibliotheks-Kacheln",
     "latest_imports": "Zuletzt importiert",
+    "recent_imported_playlists": "Zuletzt importierte Playlists global",
     "playlist_sorting": "Sortierung in Playlists durchsuchen",
     "playlist_editing": "Playlist direkt bearbeiten",
     "event_merge": "Anlass zusammenführen",
@@ -2084,6 +2090,11 @@ def init_db():
         )
     """)
 
+    cur.execute("PRAGMA table_info(import_runs)")
+    import_run_cols = {row[1] for row in cur.fetchall()}
+    if "playlist_id" not in import_run_cols:
+        cur.execute("ALTER TABLE import_runs ADD COLUMN playlist_id INTEGER")
+
     cur.execute("""
         CREATE TABLE IF NOT EXISTS learning_meta (
             key TEXT PRIMARY KEY,
@@ -2216,6 +2227,204 @@ def render_recent_import_runs(limit: int = 12):
         })
     st.subheader("Letzte Import-Vorgänge")
     st.dataframe(table_rows, width="stretch", hide_index=True)
+
+
+def get_playlist_meta_by_id(playlist_id: int):
+    conn = get_conn()
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT id, name, event, sub_event, source, is_top, created_at
+            FROM playlists
+            WHERE id = ?
+            LIMIT 1
+        """, (int(playlist_id),))
+        return cur.fetchone()
+    finally:
+        conn.close()
+
+
+def find_playlist_id_for_import_entry(playlist_name: str, event: str, sub_event: str, source: str):
+    conn = get_conn()
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT id
+            FROM playlists
+            WHERE name = ?
+              AND COALESCE(event, '') = ?
+              AND COALESCE(sub_event, '') = ?
+              AND COALESCE(source, '') = ?
+            ORDER BY id DESC
+            LIMIT 1
+        """, (
+            str(playlist_name or "").strip(),
+            normalize_meta_value(event),
+            normalize_sub_event(sub_event) if is_birthday_event(event) else str(sub_event or ""),
+            normalize_meta_value(source),
+        ))
+        row = cur.fetchone()
+        return int(row[0]) if row else None
+    finally:
+        conn.close()
+
+
+@st.cache_data(ttl=20, show_spinner=False)
+def _get_recent_imported_playlists_cached(limit: int):
+    conn = get_conn()
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT id, created_at, import_type, playlist_name, event, sub_event, source, track_count, status, note
+            FROM import_runs
+            WHERE status = 'ok'
+            ORDER BY id DESC
+            LIMIT ?
+        """, (int(limit),))
+        rows = cur.fetchall()
+    finally:
+        conn.close()
+    prepared = []
+    for run_id, created_at, import_type, playlist_name, event, sub_event, source, track_count, status, note in rows:
+        resolved_playlist_id = find_playlist_id_for_import_entry(playlist_name, event, sub_event, source) or 0
+        prepared.append({
+            "run_id": int(run_id),
+            "created_at": created_at or "-",
+            "import_type": import_type or "-",
+            "playlist_name": playlist_name or "-",
+            "event": normalize_meta_value(event),
+            "sub_event": normalize_sub_event(sub_event),
+            "event_label": format_event_label(event, sub_event) if event else "-",
+            "source": source or "-",
+            "track_count": int(track_count or 0),
+            "status": status or "ok",
+            "note": note or "",
+            "playlist_id": resolved_playlist_id,
+        })
+    return prepared
+
+
+def get_recent_imported_playlists(limit: int = 20):
+    return _get_recent_imported_playlists_cached(int(limit))
+
+
+def jump_to_playlist_browser_for_playlist(playlist_id: int):
+    row = get_playlist_meta_by_id(playlist_id)
+    if not row:
+        return False
+    _pid, _name, event, sub_event, source, _is_top, _created_at = row
+    st.session_state["browse_focus_playlist_id"] = int(playlist_id)
+    st.session_state["browse_event"] = normalize_meta_value(event) or "Alle"
+    st.session_state["browse_source"] = normalize_meta_value(source) or "Alle"
+    st.session_state["browse_sub_event"] = normalize_sub_event(sub_event) if is_birthday_event(event) else "Alle"
+    st.session_state["browse_top"] = False
+    st.session_state["browse_sort"] = "Neueste zuerst"
+    set_active_menu("Playlists durchsuchen")
+    return True
+
+
+def jump_to_analyse_hub_for_playlist(playlist_id: int):
+    row = get_playlist_meta_by_id(playlist_id)
+    if not row:
+        return False
+    _pid, name, event, sub_event, source, _is_top, _created_at = row
+    st.session_state["hub_event"] = normalize_meta_value(event) or "Alle"
+    st.session_state["hub_source"] = normalize_meta_value(source) or "Alle"
+    st.session_state["hub_depth"] = 20
+    st.session_state["recent_analysis_playlist_id"] = int(playlist_id)
+    st.session_state["recent_analysis_playlist_name"] = str(name or "")
+    st.session_state["recent_analysis_playlist_event_label"] = format_event_label(event, sub_event)
+    set_active_menu("Analyse Hub")
+    return True
+
+
+def build_single_playlist_analysis(playlist_id: int):
+    playlist_row = get_playlist_meta_by_id(playlist_id)
+    if not playlist_row:
+        return None
+    pid, name, event, sub_event, source, is_top, created_at = playlist_row
+    tracks = get_playlist_tracks(pid)
+    if not tracks:
+        return None
+    display_rows = [f"{a} - {t}" for _p, a, t, _r, _raw, _n in tracks if (a or t)]
+    artists = [str(a or '').strip() for _p, a, _t, _r, _raw, _n in tracks if str(a or '').strip()]
+    unique_artists = len({a.casefold() for a in artists})
+    first_tracks = display_rows[:5]
+    last_tracks = display_rows[-5:]
+    transitions = []
+    for idx in range(len(display_rows) - 1):
+        transitions.append({"Von": display_rows[idx], "Zu": display_rows[idx + 1], "Pos": idx + 1})
+    preview_rows = [{"Pos": pos, "Artist": artist, "Titel": title} for pos, artist, title, _r, _raw, _n in tracks[:30]]
+    return {"playlist_id": pid, "name": name, "event_label": format_event_label(event, sub_event) or "-", "source": source or "-", "created_at": created_at or "-", "is_top": bool(is_top), "track_count": len(tracks), "unique_artists": unique_artists, "first_tracks": first_tracks, "last_tracks": last_tracks, "transitions": transitions[:12], "preview_rows": preview_rows}
+
+
+def render_recent_playlist_detail(pack: dict, key_prefix: str = "recent_detail"):
+    st.markdown(f"### {pack['name']}")
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Tracks", pack["track_count"])
+    c2.metric("Artists", pack["unique_artists"])
+    c3.metric("Anlass", pack["event_label"])
+    c4.metric("Herkunft", pack["source"])
+    st.caption(f"Importiert / erstellt: {pack['created_at']}")
+    a1, a2 = st.columns(2)
+    if a1.button("📂 In Playlists durchsuchen öffnen", key=f"{key_prefix}_open_browser_{pack['playlist_id']}", width="stretch"):
+        if jump_to_playlist_browser_for_playlist(pack['playlist_id']):
+            st.rerun()
+    if a2.button("📊 Im Analyse Hub öffnen", key=f"{key_prefix}_open_hub_{pack['playlist_id']}", width="stretch"):
+        if jump_to_analyse_hub_for_playlist(pack['playlist_id']):
+            st.rerun()
+    t1, t2 = st.columns(2)
+    with t1:
+        st.markdown("**Start der Playlist**")
+        for item in pack["first_tracks"]:
+            st.write(f"- {item}")
+    with t2:
+        st.markdown("**Ende der Playlist**")
+        for item in pack["last_tracks"]:
+            st.write(f"- {item}")
+    if pack["transitions"]:
+        st.markdown("**Erste Übergänge dieser Playlist**")
+        st.dataframe(pack["transitions"], width="stretch", hide_index=True)
+    st.markdown("**Track-Vorschau**")
+    st.dataframe(pack["preview_rows"], width="stretch", hide_index=True)
+
+
+def render_recent_imported_playlists_panel(default_limit: int = 10, key_prefix: str = "recent_imports", show_header: bool = True):
+    if show_header:
+        st.subheader("Zuletzt importierte Playlists")
+        st.caption("Global über alle Anlässe und Quellen. Hier siehst du die zuletzt erfolgreich importierten Playlists und kannst sie direkt öffnen oder analysieren.")
+    limit_values = [10, 20, 50]
+    start_limit = default_limit if default_limit in limit_values else 10
+    limit = st.selectbox("Anzahl anzeigen", limit_values, index=limit_values.index(start_limit), key=f"{key_prefix}_limit")
+    rows = get_recent_imported_playlists(limit=limit)
+    if not rows:
+        st.info("Noch keine erfolgreich importierten Playlists gefunden.")
+        return
+    selected_id = int(st.session_state.get(f"{key_prefix}_selected_playlist_id") or 0)
+    selected_mode = st.session_state.get(f"{key_prefix}_selected_mode") or "detail"
+    for idx, row in enumerate(rows, start=1):
+        playlist_id = int(row.get("playlist_id") or 0)
+        c1, c2, c3 = st.columns([6.5, 1.2, 1.3])
+        c1.markdown(f"**{idx}. {row['playlist_name']}**")
+        c1.caption(f"{row['created_at']} | {row['event_label']} | {row['source']} | {row['track_count']} Tracks")
+        open_disabled = playlist_id <= 0
+        if c2.button("📂 Öffnen", key=f"{key_prefix}_open_{idx}_{playlist_id}", width="stretch", disabled=open_disabled):
+            st.session_state[f"{key_prefix}_selected_playlist_id"] = playlist_id
+            st.session_state[f"{key_prefix}_selected_mode"] = "detail"
+            st.rerun()
+        if c3.button("📊 Analysieren", key=f"{key_prefix}_analyze_{idx}_{playlist_id}", width="stretch", disabled=open_disabled):
+            st.session_state[f"{key_prefix}_selected_playlist_id"] = playlist_id
+            st.session_state[f"{key_prefix}_selected_mode"] = "analyze"
+            st.rerun()
+        if selected_id == playlist_id and playlist_id > 0:
+            pack = build_single_playlist_analysis(playlist_id)
+            if pack:
+                with st.container(border=True):
+                    if selected_mode == "analyze":
+                        st.info("Direkt-Analyse der ausgewählten zuletzt importierten Playlist")
+                    render_recent_playlist_detail(pack, key_prefix=f"{key_prefix}_{playlist_id}")
+            else:
+                st.warning("Die Playlist konnte nicht mehr geladen werden.")
 
 def set_learning_meta(key: str, value: str):
     conn = get_conn()
@@ -7129,6 +7338,7 @@ SIMPLE_MENU_OPTIONS = [
     "Rekordbox verbinden",
     "Fehlende Songs",
     "Playlists importieren",
+    "Zuletzt importierte Playlists",
     "Backup / Restore",
     "System / Version",
 ]
@@ -7158,6 +7368,7 @@ MENU_OPTIONS = [
     "Meine Sets",
     "Playlists durchsuchen",
     "Playlists importieren",
+    "Zuletzt importierte Playlists",
     "Rekordbox verbinden",
     "Set Builder",
     "Smart Event Brain",
@@ -7271,6 +7482,7 @@ elif menu == "Playlists importieren":
     render_last_upload_result_rows()
     render_upload_busy_notice()
     render_recent_import_runs(limit=10)
+    render_recent_imported_playlists_panel(default_limit=10, key_prefix="recent_imports_inline", show_header=True)
     if not require_safe_storage_before_imports():
         st.stop()
 
@@ -7683,6 +7895,11 @@ elif menu == "Playlists importieren":
 elif menu == "Upload Dashboard":
     render_upload_dashboard_page()
 
+elif menu == "Zuletzt importierte Playlists":
+    st.header("Zuletzt importierte Playlists")
+    st.caption("Global über alle Quellen und Anlässe. So findest du schnell die letzten 10, 20 oder 50 Uploads und kannst sie direkt öffnen oder analysieren.")
+    render_recent_imported_playlists_panel(default_limit=20, key_prefix="recent_imports_page", show_header=False)
+
 elif menu == "Playlists durchsuchen":
     st.header("Playlists durchsuchen")
     st.caption("Hier kannst du gespeicherte Playlists filtern, gezielt löschen und gefilterte Metadaten gesammelt anpassen.")
@@ -7705,6 +7922,16 @@ elif menu == "Playlists durchsuchen":
         st.info("Noch keine Playlists importiert.")
 
     st.divider()
+
+    focused_playlist_id = int(st.session_state.get("browse_focus_playlist_id") or 0)
+    if focused_playlist_id:
+        focused_pack = build_single_playlist_analysis(focused_playlist_id)
+        if focused_pack:
+            with st.expander("🎯 Direkt geöffnete Playlist", expanded=True):
+                render_recent_playlist_detail(focused_pack, key_prefix="browse_focus")
+                if st.button("Fokus schließen", key="browse_focus_close_btn", width="stretch"):
+                    st.session_state["browse_focus_playlist_id"] = 0
+                    st.rerun()
 
     try:
         genre_values = get_distinct_values("genre")
@@ -8006,6 +8233,10 @@ if menu == "Event-Phasen":
     st.caption("V105 macht die Phasen-Auswertung deutlich intelligenter: Fokus pro Phase, Track-Check und typische Übergänge zwischen Event-Phasen.")
     with st.expander("⚡ Event Presets", expanded=False):
         render_preset_bar(target_menu="Analyse Hub", title="Schnell laden")
+    recent_playlist_name = str(st.session_state.get("recent_analysis_playlist_name") or "").strip()
+    recent_playlist_event_label = str(st.session_state.get("recent_analysis_playlist_event_label") or "").strip()
+    if recent_playlist_name:
+        st.info(f"Direkt aus zuletzt importierten Playlists geöffnet: {recent_playlist_name} | {recent_playlist_event_label or '-'}")
 
     c1, c2, c3, c4 = st.columns(4)
     filter_event = c1.selectbox("Anlass", events, key="phase_event")
