@@ -1,0 +1,14 @@
+V2 Aenderungen
+
+Neu:
+- modules/runtime_bootstrap.py
+- Start_DJ_Tool_V2_auto_browser.bat
+- README_V2.txt
+
+Geaendert:
+- app_modular.py startet ueber runtime_bootstrap
+
+Hinweis:
+- app.py wurde nicht ersetzt
+- app_STABLE_backup.py bleibt als Rueckfall erhalten
+- Fachlogik wurde in V2 noch nicht tief umgebaut; Fokus war sicherer Start und sauberere V2-Basis

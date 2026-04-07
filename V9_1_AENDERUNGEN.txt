@@ -1,0 +1,4 @@
+V9.1 AENDERUNGEN
+1. Launcher zeigt V9.1 komplett
+2. Sichtbare Systemversion oben: Launcher + Zeit + Basis
+3. Navigation links alphabetisch, Start bleibt oben

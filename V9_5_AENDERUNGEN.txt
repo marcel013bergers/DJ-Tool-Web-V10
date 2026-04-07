@@ -1,0 +1,12 @@
+DJ Tool Web V9.5
+
+Gebündelte sichere Änderungen ohne UI-Umbau:
+- Start bleibt fest auf app_modular.py
+- neue Start-BAT für V9.5 ist enthalten
+- Browser-Autostart robuster
+- zusätzliche Cache-Stufen für Anlass/Herkunft/Import-Optionen
+- Geburtstag-Unterordner gecached
+- Dubletten-Sequenzen gecached
+- compute_transitions nutzt jetzt den vorhandenen Analyse-Cache
+- zusätzliche SQLite-Indexe für Genre und Import-Signatur
+- keine Demo

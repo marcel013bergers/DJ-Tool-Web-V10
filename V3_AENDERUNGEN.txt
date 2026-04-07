@@ -1,0 +1,15 @@
+V3 Änderungen
+
+Neu:
+- modules/db_core.py
+- modules/backup_core.py
+- modules/v3_healthcheck.py
+- Start_DJ_Tool_V3_auto_browser.bat
+- README_V3.txt
+
+Geändert:
+- app_modular.py startet jetzt als V3 und macht vor Übergabe an die stabile App einen Healthcheck.
+
+Unverändert:
+- app.py bleibt enthalten.
+- app_STABLE_backup.py bleibt die sichere Rückfall-Datei.

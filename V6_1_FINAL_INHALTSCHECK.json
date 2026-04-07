@@ -1,0 +1,17 @@
+{
+  "package": "DJ Tool Web V6.1 FINAL",
+  "base_zip": "DJ_Tool_Web_V6_KOMPLETT.zip",
+  "file_count": 420,
+  "main_files_present": [
+    "app.py",
+    "app_STABLE_backup.py",
+    "app_modular.py",
+    "requirements.txt",
+    "render.yaml",
+    "Start_DJ_Tool_V6_1_final_auto_browser.bat",
+    "README_V6_1_FINAL.txt",
+    "V6_1_AENDERUNGEN.txt"
+  ],
+  "launcher_version_expected": "V6.1 final",
+  "core_version_expected": "V151"
+}

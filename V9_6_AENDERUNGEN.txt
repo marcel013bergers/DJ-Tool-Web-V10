@@ -1,0 +1,13 @@
+V9.6 - Feature Paket
+
+Neu in V9.6:
+- Sidebar Schnellzugriff: Menübegriff eingeben und direkt in einen Bereich springen
+- Zuletzt genutzt: die letzten Bereiche werden in der Sidebar als Schnellbuttons angezeigt
+- Menü-Reihenfolge bleibt unverändert
+- Start bleibt fest über app_modular.py
+- neue Start-BAT enthalten: Start_DJ_Tool_V9_6_auto_browser.bat
+
+Wichtig:
+- keine Demo
+- bestehende DJ-Logik nicht geändert
+- volle Datenbasis bleibt erhalten

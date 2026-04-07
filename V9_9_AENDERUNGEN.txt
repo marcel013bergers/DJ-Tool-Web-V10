@@ -1,0 +1,8 @@
+V9.9 AENDERUNGEN
+- Bereichs-Hilfe jetzt konkreter mit Wofür, Was kannst du tun, schneller Ablauf, Ergebnis und Tipp
+- Hilfe erweitert fuer wichtige Bereiche wie Auto Event Set, Event Kontext KI, Transition KI und KI Rollen & Timing
+- Lernprinzipien jetzt sichtbar in Learning Dashboard, Transition KI, Live Hilfe, Event Kontext KI und Smart Event Brain
+- Confidence-Legende direkt im Tool: sehr niedrig, niedrig, mittel, hoch+
+- Klarer Hinweis: KI lernt nur aus echten gespielten Playlists, nicht aus Demo-Daten
+- Start weiterhin ueber app_modular.py
+- Komplettversion inkl. Start_DJ_Tool_V9_9_auto_browser.bat

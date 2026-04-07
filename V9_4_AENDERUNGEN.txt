@@ -1,0 +1,15 @@
+DJ Tool Web V9.4
+
+Diese Version enthält eine neue app.py auf Basis der vorherigen Komplettversion.
+
+Wichtige Änderungen:
+- Schnell-Backup jetzt lazy: ZIP wird erst beim Klick vorbereitet
+- DB-signaturbasierte Caches für Listen, Tracks, Filter und Analysen
+- zusätzliche SQLite-Indexe für schnellere Abfragen
+- SQLite-PRAGMAs für ruhigere Performance
+- keine Demo eingebaut
+- volle Datenbasis bleibt erhalten
+
+Ziel:
+- weniger schwere Streamlit-Reruns
+- schnellere Bedienung besonders bei Filtern, Playlist-Ansichten und Analyseaufrufen

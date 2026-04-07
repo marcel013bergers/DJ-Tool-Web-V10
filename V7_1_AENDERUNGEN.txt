@@ -1,0 +1,5 @@
+V7.1 AENDERUNGEN
+1. Launcher zeigt V7.1 schneller komplett
+2. Transition KI deutlich beschleunigt
+3. Smart-Bewertung nutzt Cache und kleinere Kandidatenmenge
+4. Kettenberechnung erst bei Bedarf

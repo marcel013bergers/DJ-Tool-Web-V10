@@ -1,0 +1,5 @@
+V9 AENDERUNGEN
+1. Launcher zeigt V9 intelligenter komplett
+2. Set-Richtung sichtbar
+3. Energie-Hinweis sichtbar
+4. neue Route-Tabelle fuer 2-3 Song Wege

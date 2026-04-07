@@ -1,0 +1,13 @@
+{
+  "v": 5,
+  "status": "ok",
+  "live_db_exists": true,
+  "backup_zip_exists": true,
+  "stable_app_exists": true,
+  "live_playlists": 402,
+  "live_tracks": 30726,
+  "selected_source": "backup_zip",
+  "notes": [
+    "Live Datenbestand ist vorhanden"
+  ]
+}

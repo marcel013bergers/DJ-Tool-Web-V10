@@ -1,0 +1,5 @@
+V4 Aenderungen
+1. Neue Module: startup_bridge.py, v4_healthcheck.py
+2. app_modular.py nutzt V4 Startpfad
+3. Neues Batchfile fuer Browser-Autostart
+4. Keine sichtbare UI-Aenderung, nur sicherere Struktur

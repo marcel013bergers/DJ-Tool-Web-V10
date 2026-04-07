@@ -1,0 +1,17 @@
+V1 modular - was neu ist
+
+Neu:
+- app_modular.py als sicherer V1-Startpunkt
+- modules/config.py
+- modules/storage.py
+- modules/data_bootstrap.py
+- v1_runtime_status.json wird beim Start geschrieben
+- hochgeladenes Backup ist im Projekt enthalten
+
+Geaendert:
+- app.py wurde nicht ersetzt
+- app_STABLE_backup.py wurde als Rueckfall mit abgelegt
+
+Noch nicht modularisiert:
+- komplette DJ-Fachlogik bleibt bewusst noch in der stabilen App
+- keine Kernfunktion wurde entfernt

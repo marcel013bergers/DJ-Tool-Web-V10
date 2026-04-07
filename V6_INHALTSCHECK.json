@@ -1,0 +1,17 @@
+{
+  "package": "DJ Tool Web V6 komplett",
+  "base": "V5.3 komplett",
+  "file_count": 414,
+  "must_have": [
+    "app.py",
+    "app_STABLE_backup.py",
+    "app_modular.py",
+    "requirements.txt",
+    "render.yaml",
+    "dj_tool_backup_2026-04-02_20-12.zip",
+    "README_V6.txt",
+    "V6_AENDERUNGEN.txt",
+    "Start_DJ_Tool_V6_komplett_auto_browser.bat"
+  ],
+  "modules_count": 12
+}

@@ -1,0 +1,19 @@
+{
+  "live_dir": "\\var\\data\\dj_tool_live_data",
+  "live_db": "\\var\\data\\dj_tool_live_data\\djtool_live.db",
+  "live_sets": "\\var\\data\\dj_tool_live_data\\saved_sets.json",
+  "live_playlists": 402,
+  "live_tracks": 30726,
+  "source_label": "auto:\\var\\data\\dj_tool_live_data",
+  "persistent_mode": true,
+  "source_db": "D:\\Professional DJ team Dropbox\\Marcel Bergers\\ChatCPT_DJ_System\\DJ_Nachbarschaftstool\\DJ Tool Web V10\\djtool.db",
+  "source_playlists": 219,
+  "source_tracks": 28859,
+  "backup_zip": "D:\\Professional DJ team Dropbox\\Marcel Bergers\\ChatCPT_DJ_System\\DJ_Nachbarschaftstool\\DJ Tool Web V10\\dj_tool_backup_2026-04-02_20-12.zip",
+  "backup_playlists": 402,
+  "backup_tracks": 30726,
+  "copied_db": true,
+  "copied_sets": false,
+  "restored_from_backup": true,
+  "selected_source": "backup_zip"
+}

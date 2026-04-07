@@ -1,0 +1,1 @@
+V5.2 CLEAN\n- basiert vollstaendig auf V5_FIXED_SAFE\n- korrigierte Versionsanzeige ueber separates Modul\n- neuer klarer Start: Start_DJ_Tool_V5_2_clean_auto_browser.bat\n

@@ -1,0 +1,12 @@
+DJ Tool V10 - Abschlussversion
+
+Neu in V10
+- Einfach/Profi-Modus in der Sidebar
+- Kompaktmodus fuer ruhigere iPad-Nutzung
+- V10 Schnell-Workflow fuer Event -> Stil -> Auto Event Set
+- sichtbare V10-Kennung in Sidebar/System
+
+Wichtig
+- Start weiter ueber app_modular.py
+- DJ-Logik und volle Datenbasis bleiben unveraendert
+- keine Demo enthalten

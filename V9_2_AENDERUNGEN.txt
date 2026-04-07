@@ -1,0 +1,4 @@
+V9.2 AENDERUNGEN
+1. Launcher zeigt V9.2 Mini-Fix komplett
+2. Transition KI erklärt wenig/0 Treffer besser
+3. Hinweise zu Filter, Herkunft, Anlass und Top-Playlists ergänzt

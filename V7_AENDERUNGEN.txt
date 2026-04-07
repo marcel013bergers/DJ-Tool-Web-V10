@@ -1,0 +1,5 @@
+V7 AENDERUNGEN
+1. app_modular.py zeigt V7 komplett
+2. Smart Transition Engine hinzugefügt
+3. Transition KI sortiert Folgetracks jetzt nach echten Übergängen + Kontext-Fit
+4. Begründung pro Empfehlung sichtbar

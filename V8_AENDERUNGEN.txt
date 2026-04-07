@@ -1,0 +1,5 @@
+V8 AENDERUNGEN
+1. Launcher zeigt V8 smarter komplett
+2. Smart Transition Engine erklärt Empfehlungen besser
+3. Top 3 Übergänge separat sichtbar
+4. Event-Fit und Typ ergänzt

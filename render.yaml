@@ -1,0 +1,6 @@
+services:
+  - type: web
+    name: dj-tool-streamlit
+    runtime: docker
+    plan: starter
+    autoDeploy: true

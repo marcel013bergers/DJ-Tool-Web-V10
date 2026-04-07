@@ -1,0 +1,14 @@
+{
+  "package": "DJ Tool Web V9.1 KOMPLETT",
+  "base_zip": "DJ_Tool_Web_V9_INTELLIGENTER_KOMPLETT.zip",
+  "main_files_present": [
+    "app.py",
+    "app_STABLE_backup.py",
+    "app_modular.py",
+    "requirements.txt",
+    "render.yaml",
+    "Start_DJ_Tool_V9_1_komplett_auto_browser.bat",
+    "README_V9_1.txt",
+    "V9_1_AENDERUNGEN.txt"
+  ]
+}

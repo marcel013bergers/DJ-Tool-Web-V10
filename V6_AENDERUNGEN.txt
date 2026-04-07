@@ -1,0 +1,4 @@
+Neu in V6:
+1. Dirty-Tracking fuer Learning nach Import, Restore, Loeschen und Meta-Aenderungen.
+2. Auto-Rebuild beim Start, wenn Lernbasis veraendert oder veraltet ist.
+3. Learning Dashboard zeigt KI-Vertrauen, Lernbasis und staerksten Folgesong.

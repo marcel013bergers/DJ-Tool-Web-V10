@@ -1,0 +1,14 @@
+{
+  "package": "DJ Tool Web V8 smarter KOMPLETT",
+  "base_zip": "DJ_Tool_Web_V7_1_SCHNELLER_KOMPLETT.zip",
+  "main_files_present": [
+    "app.py",
+    "app_STABLE_backup.py",
+    "app_modular.py",
+    "requirements.txt",
+    "render.yaml",
+    "Start_DJ_Tool_V8_smarter_komplett_auto_browser.bat",
+    "README_V8.txt",
+    "V8_AENDERUNGEN.txt"
+  ]
+}

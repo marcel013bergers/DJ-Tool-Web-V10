@@ -1,0 +1,25 @@
+{
+  "package": "DJ Tool Web V5.3 komplett",
+  "base": "DJ Tool Web V5.2 Clean",
+  "file_count": 407,
+  "module_count": 12,
+  "main_files_present": [
+    "app.py",
+    "app_STABLE_backup.py",
+    "app_modular.py",
+    "requirements.txt",
+    "render.yaml",
+    "Start_DJ_Tool_auto_browser.bat",
+    "Start_DJ_Tool_V2_auto_browser.bat",
+    "Start_DJ_Tool_V3_auto_browser.bat",
+    "Start_DJ_Tool_V4_auto_browser.bat",
+    "Start_DJ_Tool_V5_auto_browser.bat",
+    "Start_DJ_Tool_V5_2_clean_auto_browser.bat",
+    "dj_tool_backup_2026-04-02_20-12.zip",
+    "modules/runtime_bootstrap.py",
+    "modules/startup_bridge.py",
+    "modules/v4_healthcheck.py",
+    "modules/v5_preflight.py",
+    "modules/version_banner.py"
+  ]
+}

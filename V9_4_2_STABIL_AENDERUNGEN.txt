@@ -1,0 +1,9 @@
+V9.4.2 Stabil
+- Start dauerhaft über app_modular.py festgezogen
+- neue Start-BAT mit Auto-Browser ergänzt
+- app.py gegen Direktstart abgesichert
+- Caches für Playlists, Tracks, Filter, Import-Log, Statistik, Bibliothek ergänzt
+- Cache-Clearing nach Import, Delete, Update und Bereinigung gebündelt
+- SQLite-Indexe für Playlists, Tracks und Import-Log ergänzt
+- UI / Navigation bewusst unverändert gelassen
+- Keine Demo

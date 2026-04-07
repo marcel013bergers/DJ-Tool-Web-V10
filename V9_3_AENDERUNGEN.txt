@@ -1,0 +1,6 @@
+V9.3 AENDERUNGEN
+1. Launcher zeigt V9.3 UI & Komfort Fix komplett
+2. Wide Layout aktiviert
+3. Navigation links: Start oben, Rest alphabetisch
+4. Analyse Hub Tiefe: 10/20/50/100/Alle
+5. System/Status kompakter und eingeklappt, damit Seiteninhalt oben schneller sichtbar ist

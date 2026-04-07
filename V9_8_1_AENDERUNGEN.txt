@@ -1,0 +1,5 @@
+V9.8.1
+- Bereichs-Hilfe im echten Runtime-Pfad sichtbar gemacht
+- Hilfe wird jetzt oberhalb des Inhalts eingeblendet
+- Hilfe für wichtige Bereiche standardmäßig aufgeklappt
+- Start-BAT für V9.8.1 ergänzt

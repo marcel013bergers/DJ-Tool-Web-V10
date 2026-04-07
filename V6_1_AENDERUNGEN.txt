@@ -1,0 +1,4 @@
+V6.1 FINAL AENDERUNGEN
+1. app_modular.py zeigt jetzt Launcher V6.1 final
+2. Basisanzeige oben zeigt V6 komplett
+3. neuer Start_DJ_Tool_V6_1_final_auto_browser.bat

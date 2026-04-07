@@ -1,0 +1,5 @@
+V5 bewusst vorsichtig gebaut:
+1. Kein Dummy-UI, kein Funktionsverlust.
+2. Voller Projektinhalt aus V4 bleibt enthalten.
+3. Neuer Preflight schreibt v5_preflight.json fuer schnelle Diagnose.
+4. Neuer Start_DJ_Tool_V5_auto_browser.bat mit kleinem Delay fuer den Browserstart.

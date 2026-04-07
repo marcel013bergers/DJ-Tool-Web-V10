@@ -1,0 +1,4 @@
+V5.3 komplett
+1) app_modular.py setzt Launcher-Metadaten fuer die UI.
+2) render_app_header() zeigt jetzt Launcher-Version + Core-Version.
+3) Inhaltscheck-Datei hinzugefuegt.
