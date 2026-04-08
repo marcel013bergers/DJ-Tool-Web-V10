@@ -2613,26 +2613,21 @@ def get_distinct_values(column_name):
 @st.cache_data(ttl=15, show_spinner=False)
 def _get_playlists_cached(event=None, source=None, sub_event=None, top_only=False, genre=None, data_signature: str = ""):
     del data_signature
+    del genre
     conn = get_conn()
     try:
         cur = conn.cursor()
         query = "SELECT id, name, event, sub_event, source, is_top, created_at FROM playlists WHERE 1=1"
         params = []
         if event and event != "Alle":
-            query += " AND event = ?"
-            params.append(event)
+            query += " AND LOWER(TRIM(COALESCE(event, ''))) = LOWER(TRIM(?))"
+            params.append(normalize_meta_value(event))
         if source and source != "Alle":
-            query += " AND source = ?"
-            params.append(source)
+            query += " AND LOWER(TRIM(COALESCE(source, ''))) = LOWER(TRIM(?))"
+            params.append(normalize_meta_value(source))
         if sub_event and sub_event != "Alle":
-            query += " AND sub_event = ?"
-            params.append(sub_event)
-        if genre and genre != "Alle":
-            try:
-                query += " AND genre = ?"
-                params.append(genre)
-            except Exception:
-                pass
+            query += " AND LOWER(TRIM(COALESCE(sub_event, ''))) = LOWER(TRIM(?))"
+            params.append(normalize_sub_event(sub_event))
         if top_only:
             query += " AND is_top = 1"
         query += " ORDER BY id DESC"
@@ -7066,30 +7061,24 @@ elif menu == "Playlists durchsuchen":
     st.caption("Hier kannst du gespeicherte Playlists filtern, gezielt löschen und gefilterte Metadaten gesammelt anpassen.")
 
     overview = get_library_overview()
-    cols = st.columns(5)
+    cols = st.columns(4)
     cols[0].metric("Playlists gesamt", p_count)
     cols[1].metric("Tracks gesamt", t_count)
     cols[2].metric("Anlässe", overview.get("event_count", 0))
     cols[3].metric("Quellen", overview.get("source_count", 0))
-    cols[4].metric("Genres", overview.get("genre_count", 0))
 
     st.subheader("Zuletzt erfolgreich importiert")
     latest_rows = overview.get("latest_rows", [])
     if latest_rows:
         for pid, latest_name, latest_event, latest_sub_event, latest_source, latest_genre, latest_created in latest_rows:
             latest_event_label = format_event_label(latest_event, latest_sub_event)
-            st.caption(f"• {latest_name} | {latest_event_label or '-'} | {latest_source or '-'} | {latest_genre or '-'} | {latest_created or '-'}")
+            st.caption(f"• {latest_name} | {latest_event_label or '-'} | {latest_source or '-'} | {latest_created or '-'}")
     else:
         st.info("Noch keine Playlists importiert.")
 
     st.divider()
 
-    try:
-        genre_values = get_distinct_values("genre")
-    except Exception:
-        genre_values = ["Alle"]
-
-    f1, f2, f3, f4, f5 = st.columns(5)
+    f1, f2, f3, f4 = st.columns(4)
     filter_event = f1.selectbox("Anlass", events, key="browse_event")
     filter_source = f2.selectbox("Herkunft", sources, key="browse_source")
     filter_sub_event = "Alle"
@@ -7097,14 +7086,10 @@ elif menu == "Playlists durchsuchen":
         filter_sub_event = f3.selectbox("Geburtstag-Unterordner", get_distinct_sub_events(filter_event), key="browse_sub_event")
     else:
         f3.caption("Geburtstag-Unterordner nur bei Geburtstag")
-    filter_genre = f4.selectbox("Genre", genre_values, key="browse_genre")
-    top_only = f5.checkbox("Nur Top Playlists", key="browse_top")
+    top_only = f4.checkbox("Nur Top Playlists", key="browse_top")
     sort_option = st.selectbox("Sortierung", ["Neueste zuerst", "Älteste zuerst", "Name A–Z", "Name Z–A"], index=0, key="browse_sort")
 
-    try:
-        rows = get_playlists(event=filter_event, source=filter_source, sub_event=filter_sub_event, genre=filter_genre, top_only=top_only)
-    except TypeError:
-        rows = get_playlists(event=filter_event, source=filter_source, sub_event=filter_sub_event, top_only=top_only)
+    rows = get_playlists(event=filter_event, source=filter_source, sub_event=filter_sub_event, top_only=top_only)
 
     if sort_option == "Neueste zuerst":
         rows = sorted(rows, key=lambda x: (x[-1] or "", x[0]), reverse=True)
@@ -7133,7 +7118,6 @@ elif menu == "Playlists durchsuchen":
                 event=filter_event,
                 source=filter_source,
                 sub_event=filter_sub_event,
-                genre=filter_genre,
                 top_only=top_only,
             )
             st.session_state["confirm_delete_filtered"] = False
@@ -7201,7 +7185,6 @@ elif menu == "Playlists durchsuchen":
                 event=filter_event,
                 source=filter_source,
                 sub_event=filter_sub_event,
-                genre=filter_genre,
                 top_only=top_only,
                 new_event=update_event,
                 new_source=update_source,
@@ -7213,15 +7196,11 @@ elif menu == "Playlists durchsuchen":
                 st.info("Keine Änderung durchgeführt.")
 
     for row in rows:
-        if len(row) == 7:
-            pid, name, event, sub_event, source, is_top, created_at = row
-            genre = ""
-        else:
-            pid, name, event, sub_event, source, genre, is_top, created_at = row
+        pid, name, event, sub_event, source, is_top, created_at = row
 
         event_label = format_event_label(event, sub_event)
         top_label = "⭐ " if is_top else ""
-        label = f"{top_label}{name} | {event_label or '-'} | {source or '-'} | {genre or '-'} | {created_at or '-'}"
+        label = f"{top_label}{name} | {event_label or '-'} | {source or '-'} | {created_at or '-'}"
         with st.expander(label):
             tracks = get_playlist_tracks(pid)
             st.write(f"Tracks: {len(tracks)}")

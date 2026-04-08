@@ -1,4 +1,5 @@
+
 @echo off
-start http://localhost:8501
+cd /d %~dp0
 streamlit run app_modular.py
 pause

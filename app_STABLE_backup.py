@@ -55,10 +55,10 @@ import urllib.parse
 warnings.filterwarnings("ignore")
 logging.getLogger("streamlit").setLevel(logging.ERROR)
 
-APP_VERSION = "DJ Tool DJ Tool V10.1.3 - SQL Fix Komplettversion"
-APP_SHORT_VERSION = "V10.1.3"
-APP_BUILD_DATE = "2026-04-04"
-APP_BUILD_TIME = "13:55"
+APP_VERSION = "DJ Tool V16 - Heute auflegen + DJ Memory PRO"
+APP_SHORT_VERSION = "V16"
+APP_BUILD_DATE = "2026-04-08"
+APP_BUILD_TIME = "15:45"
 APP_BUILD_SOURCE = "V10 Basis + korrigierter Runtime-Pfad für zuletzt importierte Playlists"
 APP_BASELINE_ID = "djtool_master_baseline_v1"
 LOGIN_ENABLED = True
@@ -2063,9 +2063,27 @@ def init_db():
             combo_text TEXT,
             source_track TEXT,
             note TEXT,
+            category TEXT DEFAULT '',
+            tags TEXT DEFAULT '',
+            usage_context TEXT DEFAULT '',
+            playlist_name TEXT DEFAULT '',
+            playlist_id INTEGER DEFAULT 0,
             created_at TEXT DEFAULT CURRENT_TIMESTAMP
         )
     """)
+
+    cur.execute("PRAGMA table_info(saved_combos)")
+    saved_combo_cols = {row[1] for row in cur.fetchall()}
+    if "category" not in saved_combo_cols:
+        cur.execute("ALTER TABLE saved_combos ADD COLUMN category TEXT DEFAULT ''")
+    if "tags" not in saved_combo_cols:
+        cur.execute("ALTER TABLE saved_combos ADD COLUMN tags TEXT DEFAULT ''")
+    if "usage_context" not in saved_combo_cols:
+        cur.execute("ALTER TABLE saved_combos ADD COLUMN usage_context TEXT DEFAULT ''")
+    if "playlist_name" not in saved_combo_cols:
+        cur.execute("ALTER TABLE saved_combos ADD COLUMN playlist_name TEXT DEFAULT ''")
+    if "playlist_id" not in saved_combo_cols:
+        cur.execute("ALTER TABLE saved_combos ADD COLUMN playlist_id INTEGER DEFAULT 0")
 
     cur.execute("PRAGMA table_info(playlists)")
     playlist_cols = {row[1] for row in cur.fetchall()}
@@ -2149,6 +2167,9 @@ def init_db():
     cur.execute("CREATE INDEX IF NOT EXISTS idx_import_runs_created_at ON import_runs(created_at DESC)")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_playlists_genre ON playlists(genre)")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_import_runs_signature ON import_runs(signature)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_saved_combos_type ON saved_combos(combo_type)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_saved_combos_category ON saved_combos(category)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_saved_combos_context ON saved_combos(usage_context)")
 
     conn.commit()
     conn.close()
@@ -3739,7 +3760,8 @@ def estimate_track_energy(track_name, event=None, source=None, top_only=False, s
 def save_combo_to_set(combo_text: str):
     items = st.session_state.setdefault("set_builder", [])
     added = 0
-    for part in [p.strip() for p in str(combo_text).split("→") if p.strip()]:
+    raw_parts = re.split(r"\s*(?:\||→)\s*", str(combo_text or "").strip())
+    for part in [p.strip() for p in raw_parts if p.strip()]:
         if part not in items:
             items.append(part)
             added += 1
@@ -4177,66 +4199,76 @@ def get_missing_tracks(event=None, source=None, top_only=False, sub_event=None):
     return missing
 
 
-def save_combo(combo_type, combo_text, source_track="", note=""):
+
+def _normalize_tag_text(value: str) -> str:
+    raw = str(value or "").replace(";", ",")
+    parts = [p.strip() for p in raw.split(",")]
+    clean = []
+    seen = set()
+    for part in parts:
+        if not part:
+            continue
+        key = part.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        clean.append(part)
+    return ", ".join(clean)
+
+
+def save_combo(combo_type, combo_text, source_track="", note="", category="", tags="", usage_context="", playlist_name="", playlist_id=0):
     conn = get_conn()
     cur = conn.cursor()
     cur.execute("""
-        INSERT INTO saved_combos(combo_type, combo_text, source_track, note)
-        VALUES(?,?,?,?)
-    """, (combo_type, combo_text, source_track, note))
+        INSERT INTO saved_combos(combo_type, combo_text, source_track, note, category, tags, usage_context, playlist_name, playlist_id)
+        VALUES(?,?,?,?,?,?,?,?,?)
+    """, (
+        str(combo_type or "").strip(),
+        str(combo_text or "").strip(),
+        str(source_track or "").strip(),
+        str(note or "").strip(),
+        str(category or "").strip(),
+        _normalize_tag_text(tags),
+        str(usage_context or "").strip(),
+        str(playlist_name or "").strip(),
+        int(playlist_id or 0),
+    ))
     conn.commit()
     conn.close()
     auto_backup_after_data_change("combo_save")
 
 
-def get_saved_combos():
+def get_saved_combos(combo_type="Alle", category="", tag="", usage_context="", query_text=""):
     conn = get_conn()
     cur = conn.cursor()
-    cur.execute("""
-        SELECT id, combo_type, combo_text, source_track, note, created_at
+    sql = """
+        SELECT id, combo_type, combo_text, source_track, note, category, tags, usage_context, playlist_name, playlist_id, created_at
         FROM saved_combos
-        ORDER BY id DESC
-    """)
+        WHERE 1=1
+    """
+    params = []
+    if combo_type and combo_type != "Alle":
+        sql += " AND combo_type = ?"
+        params.append(combo_type)
+    if str(category or "").strip():
+        sql += " AND LOWER(COALESCE(category,'')) = ?"
+        params.append(str(category).strip().casefold())
+    if str(tag or "").strip():
+        sql += " AND LOWER(COALESCE(tags,'')) LIKE ?"
+        params.append(f"%{str(tag).strip().casefold()}%")
+    if str(usage_context or "").strip():
+        sql += " AND LOWER(COALESCE(usage_context,'')) = ?"
+        params.append(str(usage_context).strip().casefold())
+    if str(query_text or "").strip():
+        q = f"%{str(query_text).strip().casefold()}%"
+        sql += " AND (LOWER(COALESCE(combo_text,'')) LIKE ? OR LOWER(COALESCE(note,'')) LIKE ? OR LOWER(COALESCE(category,'')) LIKE ? OR LOWER(COALESCE(tags,'')) LIKE ? OR LOWER(COALESCE(usage_context,'')) LIKE ? OR LOWER(COALESCE(playlist_name,'')) LIKE ?)"
+        params.extend([q, q, q, q, q, q])
+    sql += " ORDER BY id DESC"
+    cur.execute(sql, params)
     rows = cur.fetchall()
     conn.close()
     return rows
 
-
-
-
-def evaluate_set(transitions_counts, set_list):
-    # returns per-transition labels and score
-    scores = []
-    total = 0
-    count = 0
-    for i in range(len(set_list)-1):
-        a = set_list[i]
-        b = set_list[i+1]
-        # normalize like insights
-        a_n = normalize_track_text(a)
-        b_n = normalize_track_text(b)
-        cnt = 0
-        for (x,y),c in transitions_counts.items():
-            if x.endswith(a_n) or a_n in x:
-                if y.endswith(b_n) or b_n in y:
-                    cnt += c
-        if cnt >= 10:
-            label = "🔥 stark"
-            val = 3
-        elif cnt >= 5:
-            label = "👍 mittel"
-            val = 2
-        elif cnt >= 1:
-            label = "⚠️ selten"
-            val = 1
-        else:
-            label = "❌ unbekannt"
-            val = 0
-        scores.append((f"{a} → {b}", cnt, label))
-        total += val
-        count += 1
-    score = int((total / max(1, count*3)) * 100)
-    return scores, score
 
 def delete_combo(combo_id):
     conn = get_conn()
@@ -4247,7 +4279,67 @@ def delete_combo(combo_id):
     auto_backup_after_data_change("combo_delete")
 
 
+def get_saved_combo_categories():
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("SELECT category FROM saved_combos WHERE TRIM(COALESCE(category,'')) <> '' ORDER BY category")
+    rows = [r[0] for r in cur.fetchall()]
+    conn.close()
+    out = []
+    seen = set()
+    for value in rows:
+        key = str(value).strip().casefold()
+        if key and key not in seen:
+            seen.add(key)
+            out.append(str(value).strip())
+    return out
+
+
+def get_saved_combo_contexts():
+    conn = get_conn()
+    cur = conn.cursor()
+    try:
+        cur.execute("SELECT usage_context FROM saved_combos WHERE TRIM(COALESCE(usage_context,'')) <> '' ORDER BY usage_context")
+        rows = [r[0] for r in cur.fetchall()]
+    except Exception:
+        rows = []
+    conn.close()
+    out = []
+    seen = set()
+    for value in rows:
+        key = str(value).strip().casefold()
+        if key and key not in seen:
+            seen.add(key)
+            out.append(str(value).strip())
+    return out
+
+
+def get_saved_combo_tags():
+    conn = get_conn()
+    cur = conn.cursor()
+    try:
+        cur.execute("SELECT tags FROM saved_combos WHERE TRIM(COALESCE(tags,'')) <> ''")
+        rows = [r[0] for r in cur.fetchall()]
+    except Exception:
+        rows = []
+    conn.close()
+    out = []
+    seen = set()
+    for raw in rows:
+        for part in str(raw or "").replace(";", ",").split(","):
+            tag = part.strip()
+            if not tag:
+                continue
+            key = tag.casefold()
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(tag)
+    return sorted(out, key=lambda x: x.casefold())
+
+
 def strength_label(cnt):
+
     if cnt >= 10:
         return "🔥 sehr oft"
     if cnt >= 5:
@@ -4757,6 +4849,41 @@ def get_heute_auflegen_pack(event=None, source=None, top_only=False, sub_event=N
     }
 
 
+def render_set_builder_panel(title: str = "Heutiges Set"):
+    st.subheader(title)
+    items = st.session_state.setdefault("set_builder", [])
+    if not items:
+        st.info("Noch keine Songs im aktuellen Set. Nutze in DJ Memory oder Heute auflegen die Buttons '➕ Set' bzw. '➕ Heute'.")
+        return
+
+    m1, m2 = st.columns([3, 2])
+    m1.metric("Songs im Set", len(items))
+    m2.caption("Baue hier dein aktuelles Arbeits-Set für heute.")
+
+    top_a, top_b, top_c = st.columns(3)
+    if top_a.button("⬅️ Letzten entfernen", key=f"{title}_remove_last", width="stretch"):
+        if items:
+            items.pop()
+            st.rerun()
+    if top_b.button("🧹 Set leeren", key=f"{title}_clear_all", width="stretch"):
+        st.session_state["set_builder"] = []
+        st.rerun()
+    top_c.download_button(
+        "📥 Set als TXT",
+        "\n".join(items),
+        file_name="heute_set.txt",
+        width="stretch",
+        key=f"{title}_download_txt",
+    )
+
+    for idx, song in enumerate(items, start=1):
+        row_cols = st.columns([7, 1.2])
+        row_cols[0].write(f"{idx}. {song}")
+        if row_cols[1].button("🗑️", key=f"{title}_del_{idx}", width="stretch"):
+            del items[idx-1]
+            st.rerun()
+
+
 def render_heute_auflegen_page():
     st.header("Heute auflegen")
     st.caption("Wähle deinen Anlass und hol dir sofort Warmup-, Mittelteil-, Peak- und Closing-Ideen inklusive Songpaare und Blöcke.")
@@ -4777,6 +4904,7 @@ def render_heute_auflegen_page():
     pack = get_heute_auflegen_pack(event=ev, source=src, top_only=top, sub_event=sub_ev)
 
     st.info("Für normale Playlist-Uploads im Web-Tool brauchst du KEIN GitHub. GitHub nur für Code-Updates.")
+    render_set_builder_panel("Heute auflegen Set")
 
     tabs = st.tabs(["🌙 Warmup", "⬆️ Mittelteil", "🔥 Peak", "🌅 Closing", "🎤 Live jetzt"])
 
@@ -7910,7 +8038,7 @@ elif menu == "Playlists durchsuchen":
     cols[1].metric("Tracks gesamt", t_count)
     cols[2].metric("Anlässe", overview.get("event_count", 0))
     cols[3].metric("Quellen", overview.get("source_count", 0))
-    cols[4].metric("Genres", overview.get("genre_count", 0))
+    cols[4].metric("Top Playlists", overview.get("top_playlist_count", 0))
 
     st.subheader("Zuletzt erfolgreich importiert")
     latest_rows = overview.get("latest_rows", [])
@@ -7933,12 +8061,7 @@ elif menu == "Playlists durchsuchen":
                     st.session_state["browse_focus_playlist_id"] = 0
                     st.rerun()
 
-    try:
-        genre_values = get_distinct_values("genre")
-    except Exception:
-        genre_values = ["Alle"]
-
-    f1, f2, f3, f4, f5 = st.columns(5)
+    f1, f2, f3, f4 = st.columns(4)
     filter_event = f1.selectbox("Anlass", events, key="browse_event")
     filter_source = f2.selectbox("Herkunft", sources, key="browse_source")
     filter_sub_event = "Alle"
@@ -7946,12 +8069,11 @@ elif menu == "Playlists durchsuchen":
         filter_sub_event = f3.selectbox("Geburtstag-Unterordner", get_distinct_sub_events(filter_event), key="browse_sub_event")
     else:
         f3.caption("Geburtstag-Unterordner nur bei Geburtstag")
-    filter_genre = f4.selectbox("Genre", genre_values, key="browse_genre")
-    top_only = f5.checkbox("Nur Top Playlists", key="browse_top")
+    top_only = f4.checkbox("Nur Top Playlists", key="browse_top")
     sort_option = st.selectbox("Sortierung", ["Neueste zuerst", "Älteste zuerst", "Name A–Z", "Name Z–A"], index=0, key="browse_sort")
 
     try:
-        rows = get_playlists(event=filter_event, source=filter_source, sub_event=filter_sub_event, genre=filter_genre, top_only=top_only)
+        rows = get_playlists(event=filter_event, source=filter_source, sub_event=filter_sub_event, top_only=top_only)
     except TypeError:
         rows = get_playlists(event=filter_event, source=filter_source, sub_event=filter_sub_event, top_only=top_only)
 
@@ -7982,7 +8104,6 @@ elif menu == "Playlists durchsuchen":
                 event=filter_event,
                 source=filter_source,
                 sub_event=filter_sub_event,
-                genre=filter_genre,
                 top_only=top_only,
             )
             st.session_state["confirm_delete_filtered"] = False
@@ -8050,7 +8171,6 @@ elif menu == "Playlists durchsuchen":
                 event=filter_event,
                 source=filter_source,
                 sub_event=filter_sub_event,
-                genre=filter_genre,
                 top_only=top_only,
                 new_event=update_event,
                 new_source=update_source,
@@ -8072,14 +8192,127 @@ elif menu == "Playlists durchsuchen":
         top_label = "⭐ " if is_top else ""
         label = f"{top_label}{name} | {event_label or '-'} | {source or '-'} | {genre or '-'} | {created_at or '-'}"
         with st.expander(label):
+
             tracks = get_playlist_tracks(pid)
+
+            selected_count = sum(1 for p, _a, _t, _r, _raw, _n in tracks if st.session_state.get(f"mem_pick_{pid}_{p}"))
+            if selected_count > 0:
+                st.markdown(
+                    f"""
+                    <div style="position:sticky;top:0;z-index:5;background:#111827;border:1px solid #374151;
+                    border-radius:12px;padding:10px 14px;margin-bottom:10px;">
+                    ⭐ <b>{selected_count} Song(s) markiert</b> – unten direkt in DJ Memory speichern
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+
             st.write(f"Tracks: {len(tracks)}")
-            preview_rows = [{"Pos": p, "Artist": a, "Titel": t} for p, a, t, r, raw, n in tracks]
-            st.dataframe(
-                preview_rows,
-                width="stretch",
-                hide_index=True,
-            )
+            for p, a, t, r, raw, n in tracks:
+                display_name = f"{a} - {t}".strip(" -")
+                col_a, col_b = st.columns([0.8, 9.2])
+                col_a.checkbox(f"Merken {p}", key=f"mem_pick_{pid}_{p}", label_visibility="collapsed")
+                col_b.write(f"**{p}.** {display_name}")
+
+            chosen = []
+            for p, a, t, r, raw, n in tracks:
+                if st.session_state.get(f"mem_pick_{pid}_{p}"):
+                    chosen.append({
+                        "position": p,
+                        "display": f"{a} - {t}".strip(" -"),
+                    })
+
+            with st.container(border=True):
+                st.markdown("### ⭐ Auswahl merken")
+                st.caption("Einfach Songs anhaken, Typ festlegen und direkt speichern.")
+                if chosen:
+                    st.caption(f"{len(chosen)} Song(s) ausgewählt")
+                    st.text_area(
+                        "Auswahl",
+                        value="\n".join([f"{x['position']}. {x['display']}" for x in chosen]),
+                        height=120,
+                        disabled=True,
+                        key=f"mem_preview_{pid}",
+                    )
+                else:
+                    st.info("Einfach Songs anhaken und dann hier speichern.")
+
+                mem1, mem2, mem3 = st.columns(3)
+                combo_type = mem1.selectbox(
+                    "Speichern als",
+                    ["Block", "Übergang", "Einzeltrack"],
+                    key=f"mem_type_{pid}",
+                )
+                usage_context = mem2.selectbox(
+                    "Anlass / Einsatz",
+                    [""] + get_saved_combo_contexts() + ["Hochzeit", "Geburtstag", "Party", "Warmup", "Peak", "Closing", "NDW", "Black", "R&B"],
+                    accept_new_options=True,
+                    key=f"mem_context_{pid}",
+                )
+                category = mem3.selectbox(
+                    "Kategorie / Ordner",
+                    [""] + get_saved_combo_categories(),
+                    accept_new_options=True,
+                    key=f"mem_category_{pid}",
+                )
+
+                tags = st.text_input(
+                    "Tags (Komma getrennt)",
+                    key=f"mem_tags_{pid}",
+                    placeholder="z. B. Peak, NDW, Männerblock, Mitsingmoment",
+                )
+                if get_saved_combo_tags():
+                    st.caption("Vorhandene Tags: " + ", ".join(get_saved_combo_tags()[:20]))
+
+                note = st.text_area(
+                    "Notiz",
+                    key=f"mem_note_{pid}",
+                    placeholder="optional",
+                    height=80,
+                )
+
+                action_left, action_mid, action_right = st.columns([2.5, 1.2, 1.2])
+                if action_left.button("💾 In DJ Memory speichern", key=f"save_memory_{pid}", width="stretch"):
+                    chosen_texts = [x["display"] for x in chosen]
+                    if not chosen_texts:
+                        st.warning("Bitte erst Songs anhaken.")
+                    elif combo_type == "Einzeltrack" and len(chosen_texts) != 1:
+                        st.warning("Für Einzeltrack bitte genau 1 Song auswählen.")
+                    elif combo_type == "Übergang" and len(chosen_texts) < 2:
+                        st.warning("Für Übergang bitte mindestens 2 Songs auswählen.")
+                    else:
+                        save_combo(
+                            combo_type=combo_type,
+                            combo_text=" | ".join(chosen_texts),
+                            source_track=chosen_texts[0] if chosen_texts else "",
+                            note=note,
+                            category=category,
+                            tags=tags,
+                            usage_context=usage_context,
+                            playlist_name=name,
+                            playlist_id=pid,
+                        )
+                        st.session_state["memory_feedback"] = f"✅ Gespeichert unter: {category or 'Ohne Ordner'}"
+                        for item in tracks:
+                            st.session_state[f"mem_pick_{pid}_{item[0]}"] = False
+                        st.rerun()
+
+                if action_mid.button("🧠 DJ Memory öffnen", key=f"jump_memory_{pid}", width="stretch"):
+                    set_active_menu("Gemerkte Kombinationen")
+                    st.rerun()
+
+                if action_right.button("🧹 Auswahl leeren", key=f"clear_memory_{pid}", width="stretch"):
+                    for item in tracks:
+                        st.session_state[f"mem_pick_{pid}_{item[0]}"] = False
+                    st.rerun()
+
+            with st.expander("Trackliste als Tabelle", expanded=False):
+                preview_rows = [{"Pos": p, "Artist": a, "Titel": t} for p, a, t, r, raw, n in tracks]
+                st.dataframe(
+                    preview_rows,
+                    width="stretch",
+                    hide_index=True,
+                )
 
             edit_event_options = [x for x in events if x != "Alle"]
             edit_source_options = [x for x in sources if x != "Alle"]
@@ -8740,27 +8973,100 @@ elif menu == "Doppelte Playlists":
                     st.rerun()
 
 
+
+
 elif menu == "Gemerkte Kombinationen":
-    st.header("Gemerkte Kombinationen")
-    st.caption("Hier findest du alle von dir gespeicherten Übergänge und Blöcke.")
+    st.header("DJ Memory")
+    st.caption("Hier findest du deine gemerkten Tracks, Übergänge und Blöcke wieder – schnell suchbar und direkt zur Playlist springbar.")
 
-    combos = get_saved_combos()
+    if st.session_state.get("memory_feedback"):
+        fb1, fb2 = st.columns([4, 1])
+        fb1.success(st.session_state.get("memory_feedback"))
+        if fb2.button("Schließen", key="close_memory_feedback", width="stretch"):
+            st.session_state["memory_feedback"] = ""
+            st.rerun()
+
+    search_cols = st.columns([3, 1, 1, 1, 1])
+    query_text = search_cols[0].text_input("Suche", key="memory_search_text", placeholder="z. B. NDW, Peak, Männerblock, Black")
+    combo_type_filter = search_cols[1].selectbox("Typ", ["Alle", "Einzeltrack", "Übergang", "Block"], key="memory_filter_type")
+    category_filter = search_cols[2].selectbox("Kategorie / Ordner", [""] + get_saved_combo_categories(), accept_new_options=True, key="memory_filter_category")
+    tag_filter = search_cols[3].selectbox("Tag", [""] + get_saved_combo_tags(), accept_new_options=True, key="memory_filter_tag")
+    context_filter = search_cols[4].selectbox("Anlass / Einsatz", [""] + get_saved_combo_contexts(), accept_new_options=True, key="memory_filter_context")
+
+    combos = get_saved_combos(
+        combo_type=combo_type_filter,
+        category=category_filter,
+        tag=tag_filter,
+        usage_context=context_filter,
+        query_text=query_text,
+    )
+
+    all_combos = get_saved_combos()
+    render_set_builder_panel("Aktuelles Set")
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Alle", len(all_combos))
+    m2.metric("Blöcke", sum(1 for row in all_combos if str(row[1]) == "Block"))
+    m3.metric("Übergänge", sum(1 for row in all_combos if str(row[1]) == "Übergang"))
+    m4.metric("Tracks", sum(1 for row in all_combos if str(row[1]) == "Einzeltrack"))
+
     if not combos:
-        st.info("Noch keine Kombinationen gespeichert.")
+        st.info("Keine passenden Einträge im DJ Memory gefunden.")
     else:
-        for combo_id, combo_type, combo_text, source_track, note, created_at in combos:
-            cols = st.columns([6, 1])
-            cols[0].write(f"**{combo_type}** | {combo_text}")
-            if source_track:
-                cols[0].caption(f"Ausgehend von: {source_track}")
-            if note:
-                cols[0].write(note)
-            if cols[1].button("Löschen", key=f"combo_del_{combo_id}"):
-                delete_combo(combo_id)
-                st.success("Kombination gelöscht.")
-                st.rerun()
+        tabs = st.tabs(["Alle Treffer", "Blöcke", "Übergänge", "Tracks"])
 
+        def render_combo_list(rows, tab_key):
+            if not rows:
+                st.info("Keine Einträge in diesem Bereich.")
+                return
+            for combo_id, combo_type, combo_text, source_track, note, category, tags, usage_context, playlist_name, playlist_id, created_at in rows:
+                with st.container(border=True):
+                    top_cols = st.columns([5.5, 1.2, 1.2, 1.1])
+                    title = f"**{combo_type}**"
+                    if category:
+                        title += f" · {category}"
+                    top_cols[0].markdown(title)
 
+                    if top_cols[1].button("➕ Heute", key=f"mem_to_set_{tab_key}_{combo_id}", width="stretch"):
+                        added = save_combo_to_set(combo_text)
+                        st.success(f"{added} Song(s) ins aktuelle Set übernommen.")
+                        st.rerun()
+
+                    if playlist_id and top_cols[2].button("📂 Zur Playlist", key=f"mem_open_playlist_{tab_key}_{combo_id}", width="stretch"):
+                        if jump_to_playlist_browser_for_playlist(int(playlist_id)):
+                            st.rerun()
+
+                    if top_cols[3].button("🗑️ Löschen", key=f"combo_del_{tab_key}_{combo_id}", width="stretch"):
+                        delete_combo(combo_id)
+                        st.success("Eintrag gelöscht.")
+                        st.rerun()
+
+                    songs = [x.strip() for x in str(combo_text or "").split("|") if x.strip()]
+                    for idx, song in enumerate(songs, start=1):
+                        st.write(f"{idx}. {song}")
+
+                    meta_parts = []
+                    if usage_context:
+                        meta_parts.append(f"Anlass/Einsatz: {usage_context}")
+                    if tags:
+                        meta_parts.append(f"Tags: {tags}")
+                    if playlist_name:
+                        meta_parts.append(f"Playlist: {playlist_name}")
+                    if created_at:
+                        meta_parts.append(f"Gespeichert: {created_at}")
+                    if meta_parts:
+                        st.caption(" | ".join(meta_parts))
+
+                    if note:
+                        st.info(note)
+
+        with tabs[0]:
+            render_combo_list(combos, "all")
+        with tabs[1]:
+            render_combo_list([row for row in combos if str(row[1]) == "Block"], "block")
+        with tabs[2]:
+            render_combo_list([row for row in combos if str(row[1]) == "Übergang"], "transition")
+        with tabs[3]:
+            render_combo_list([row for row in combos if str(row[1]) == "Einzeltrack"], "track")
 
 
 elif menu == "Set Builder":

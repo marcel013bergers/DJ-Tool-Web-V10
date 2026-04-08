@@ -1,4 +1,4 @@
-"""DJ Tool V10.1.3 modular launcher.
+"""DJ Tool V16 modular launcher.
 
 V5 is intentionally conservative:
 - keeps the full V4 project contents intact
@@ -38,10 +38,10 @@ print(
     flush=True,
 )
 
-os.environ["DJ_TOOL_LAUNCHER_VERSION"] = "V10.1.3 Korrigierte Komplettversion"
+os.environ["DJ_TOOL_LAUNCHER_VERSION"] = "V16 Heute auflegen + DJ Memory PRO"
 os.environ["DJ_TOOL_LAUNCHER_LABEL"] = "Modular Launcher"
-os.environ["DJ_TOOL_CORE_APP"] = "V10.1.3"
-os.environ["DJ_TOOL_PACKAGE_BASE"] = "V10.1.3 komplett"
+os.environ["DJ_TOOL_CORE_APP"] = "V16"
+os.environ["DJ_TOOL_PACKAGE_BASE"] = "V16 Heute auflegen + DJ Memory PRO"
 
 stable_app = PROJECT_DIR / 'app_STABLE_backup.py'
 runpy.run_path(str(stable_app), run_name='__main__')
