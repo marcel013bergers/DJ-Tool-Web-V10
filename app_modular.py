@@ -38,10 +38,10 @@ print(
     flush=True,
 )
 
-os.environ["DJ_TOOL_LAUNCHER_VERSION"] = "V16 Heute auflegen + DJ Memory PRO"
+os.environ["DJ_TOOL_LAUNCHER_VERSION"] = "V17 Set Intelligence PRO"
 os.environ["DJ_TOOL_LAUNCHER_LABEL"] = "Modular Launcher"
-os.environ["DJ_TOOL_CORE_APP"] = "V16"
-os.environ["DJ_TOOL_PACKAGE_BASE"] = "V16 Heute auflegen + DJ Memory PRO"
+os.environ["DJ_TOOL_CORE_APP"] = "V17"
+os.environ["DJ_TOOL_PACKAGE_BASE"] = "V17 Set Intelligence PRO"
 
 stable_app = PROJECT_DIR / 'app_STABLE_backup.py'
 runpy.run_path(str(stable_app), run_name='__main__')

@@ -55,11 +55,11 @@ import urllib.parse
 warnings.filterwarnings("ignore")
 logging.getLogger("streamlit").setLevel(logging.ERROR)
 
-APP_VERSION = "DJ Tool V15 - Komfort & Speed"
-APP_SHORT_VERSION = "V15"
+APP_VERSION = "DJ Tool V16.1 - DJ Memory Filter PRO"
+APP_SHORT_VERSION = "V16.1"
 APP_BUILD_DATE = "2026-04-08"
-APP_BUILD_TIME = "11:10"
-APP_BUILD_SOURCE = "V14.2 stabil + Komfort/Speed/Start-Optimierung"
+APP_BUILD_TIME = "15:45"
+APP_BUILD_SOURCE = "V10 Basis + DJ Memory Filter/Tag Ausbau"
 APP_BASELINE_ID = "djtool_master_baseline_v1"
 LOGIN_ENABLED = True
 AUTO_LOGIN_TRUSTED_DEVICE = True
@@ -71,10 +71,6 @@ RELEASE_GUARD_AUTO_WRITE = True
 REQUIRE_SAFE_STORAGE_FOR_IMPORTS = True
 
 BUILD_NOTES = [
-    "V15 bringt schnelleren Start ohne pip bei jedem Tool-Start",
-    "V15 ergänzt leisen Start ohne sichtbares CMD-Fenster per VBS-Launcher",
-    "V15 macht Systemstatus/Release-Guard optional statt bei jedem Start",
-    "V15 merkt sich UI-Modus, Kompaktmodus und Hilfetexte dauerhaft",
     "V153 verschlankt Deploy/Start mit echtem Launcher statt Warn-Seite",
     "V153 reduziert Auto-Backup-Last durch Cooldown + Limitierung",
     "V153 beschleunigt zuletzt importierte Playlists per SQL-JOIN statt N+1-Queries",
@@ -121,7 +117,6 @@ BUILD_NOTES = [
 ]
 
 CHANGELOG = [
-    {"version": "V15", "date": "2026-04-09", "new": ["Schneller Start", "Leiser VBS-Launcher", "persistente UI-Einstellungen"], "fixes": ["kein pip bei jedem Start", "Systemstatus nur bei Bedarf laden", "ruhigere Sidebar und Start-Ansicht"]},
     {"version": "V153", "date": "2026-04-08", "new": ["Launcher-Fix", "Backup-Cooldown", "Import-JOIN-Cache", "Env-Login-Passwort"], "fixes": ["Docker startet wieder direkt in die echte App", "weniger ZIP-I/O bei vielen Änderungen", "schnellere zuletzt importierte Playlists", "robustere DB-Migration für genre-Index"]},
     {"version": "V10.1.3", "date": "2026-04-07", "new": ["Zuletzt importierte Playlists global", "Direkt öffnen/analysieren", "10/20/50 Auswahl"], "fixes": ["SQL-Fix für bestehende import_runs Tabellen ohne playlist_id", "klare Versionsanzeige", "sichtbarer Menüpunkt im Live-Pfad"]},
     {"version": "V10.1", "date": "2026-04-07", "new": ["Zuletzt importierte Playlists global", "Direkt öffnen", "Direkt analysieren"], "fixes": ["letzte 10/20/50 sichtbar", "Import-Historie dauerhaft nutzbar", "schneller Rücksprung zu Browser/Analyse Hub"]},
@@ -237,43 +232,7 @@ SET_FILE = str(APP_DATA_DIR / "saved_sets.json")
 BACKUP_DIR = APP_DATA_DIR / "backups"
 BACKUP_DIR.mkdir(parents=True, exist_ok=True)
 STORAGE_INFO_FILE = APP_DATA_DIR / "storage_info.json"
-UI_PREFS_FILE = APP_DATA_DIR / "ui_prefs.json"
 AUTO_BACKUP_COOLDOWN_SECONDS = int(os.environ.get("DJ_TOOL_AUTO_BACKUP_COOLDOWN", "45"))
-
-
-def load_ui_prefs() -> dict:
-    try:
-        if UI_PREFS_FILE.exists():
-            data = json.loads(UI_PREFS_FILE.read_text(encoding="utf-8"))
-            if isinstance(data, dict):
-                return data
-    except Exception:
-        pass
-    return {}
-
-
-def save_ui_prefs(data: dict):
-    try:
-        UI_PREFS_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-    except Exception:
-        pass
-
-
-def get_ui_pref(key: str, default=None):
-    prefs = load_ui_prefs()
-    return prefs.get(key, default)
-
-
-def update_ui_prefs(**kwargs):
-    prefs = load_ui_prefs()
-    changed = False
-    for key, value in kwargs.items():
-        if prefs.get(key) != value:
-            prefs[key] = value
-            changed = True
-    if changed:
-        save_ui_prefs(prefs)
-
 MAX_AUTO_BACKUP_FILES = int(os.environ.get("DJ_TOOL_MAX_AUTO_BACKUPS", "20"))
 SOURCE_PRESETS = ["Benjamin Schneider", "Michael Zimmermann", "Global", "Reverenz"]
 EVENT_IMPORT_PRESETS = ["Hochzeit", "Geburtstag", "Party", "Firmenfeier", "Fasching", "80s", "90s", "90er-2000er", "2000s", "2010s", "Mixed", "Schlager", "Rock", "Latin"]
@@ -6088,7 +6047,7 @@ def run_smart_selftest_level2():
         ("event_context_ki", "Event Kontext KI sichtbar", lambda: (("Event Kontext KI" in (MENU_OPTIONS if "MENU_OPTIONS" in globals() else [])), "Event Kontext KI im Menü vorhanden")),
         ("learning_ui", "Learning UI sichtbar", lambda: ((("render_learning_engine_panel" in globals()) and ("rebuild_learning_engine" in globals())), "Learning-Panel + Rebuild vorhanden")),
         ("event_context_ki", "Event Kontext KI sichtbar", lambda: ((("render_event_context_ki_page" in globals()) and ("get_track_event_context_pack" in globals())), "Event-Kontext-Seite + Pack vorhanden")),
-        ("release_guard", "Release Guard arbeitet", lambda: (("status" in build_release_guard_report(write_current=False)[2]), "Release Guard Bericht erzeugbar")),
+        ("release_guard", "Release Guard arbeitet", lambda: ((("build_release_guard_report" in globals()) and ("compare_release_guard_snapshots" in globals()) and ("_release_guard_stable_path" in globals())), "Release Guard Funktionen vorhanden")),
     ]
     results = []
     for key, label, fn in tests:
@@ -6217,28 +6176,18 @@ def compare_release_guard_snapshots(previous: dict | None, current: dict):
     return summary
 
 
-@st.cache_data(ttl=180, show_spinner=False)
-def build_release_guard_report_cached():
+def build_release_guard_report(write_current: bool = True):
     current = _feature_snapshot_from_selftests()
     stable = load_release_guard_manifest(_release_guard_stable_path())
-    return current, stable, compare_release_guard_snapshots(stable, current)
-
-
-def build_release_guard_report(write_current: bool = True):
-    current, stable, diff = build_release_guard_report_cached()
     if write_current and RELEASE_GUARD_AUTO_WRITE:
         _write_release_guard_manifest(current, _release_guard_current_path())
-    return current, stable, diff
+    return current, stable, compare_release_guard_snapshots(stable, current)
 
 
 def save_current_as_stable_baseline():
     current = _feature_snapshot_from_selftests()
     _write_release_guard_manifest(current, _release_guard_stable_path())
     _write_release_guard_manifest(current, _release_guard_current_path())
-    try:
-        build_release_guard_report_cached.clear()
-    except Exception:
-        pass
     return current
 
 
@@ -6293,7 +6242,6 @@ def render_release_guard_banner():
 def render_system_version_page():
     st.header("System / Version")
     st.caption("Hier siehst du Version, Historie, Fixes, Release Guard und den Selbsttest gegen die Master-Baseline.")
-    st.info("V15 Komfort: schnellerer Start, optionaler Systemstatus, dauerhafte UI-Einstellungen und leiser Start über VBS-Launcher.")
 
     a, b, c = st.columns(3)
     a.metric("Version", APP_VERSION)
@@ -7742,27 +7690,12 @@ render_app_header()
 
 p_count, t_count, l_count, c_count = stats_counts()
 ensure_build_snapshot_backup()
-show_system_status_panel = bool(st.session_state.get("show_system_status_panel", get_ui_pref("show_system_status_panel", False)))
-st.session_state["show_system_status_panel"] = show_system_status_panel
-status_cols = st.columns([4, 1.2])
-status_cols[0].caption(f"Live-Bestand: {p_count} Playlists • {t_count} Tracks • {c_count} gemerkte Kombis")
-if show_system_status_panel:
-    if status_cols[1].button("🧾 Status ausblenden", key="hide_system_status_btn", width="stretch"):
-        st.session_state["show_system_status_panel"] = False
-        update_ui_prefs(show_system_status_panel=False)
-        st.rerun()
-    with st.expander(f"System / Status ({p_count} Playlists • {t_count} Tracks)", expanded=False):
-        st.caption(f"Build: {APP_BUILD_DATE} · {APP_BUILD_TIME}")
-        st.caption(f"Quelle: {APP_BUILD_SOURCE}")
-        st.caption("Systemstatus und Release Guard werden in V15 nur noch bei Bedarf geladen. Das macht den normalen Start ruhiger und schneller.")
-        render_data_safety_status(p_count, t_count)
-        render_release_guard_banner()
-else:
-    if status_cols[1].button("🧾 Status laden", key="show_system_status_btn", width="stretch"):
-        st.session_state["show_system_status_panel"] = True
-        update_ui_prefs(show_system_status_panel=True)
-        st.rerun()
-    st.caption("System / Status bleibt für schnelleren Start ausgeblendet. Bei Bedarf oben laden.")
+with st.expander(f"System / Status ({p_count} Playlists • {t_count} Tracks)", expanded=False):
+    st.caption(f"Build: {APP_BUILD_DATE} · {APP_BUILD_TIME}")
+    st.caption(f"Quelle: {APP_BUILD_SOURCE}")
+    st.caption("Trusted Device Auto-Login bleibt aktiv. Neu in V104: Wenn Render nach einem Deploy leer startet, zieht das Tool automatisch das neueste Dropbox-Backup und stellt deine Daten wieder her.")
+    render_data_safety_status(p_count, t_count)
+    render_release_guard_banner()
 
 
 SIMPLE_MENU_OPTIONS = [
@@ -7824,9 +7757,9 @@ if st.session_state["active_menu"] not in MENU_OPTIONS:
     st.session_state["active_menu"] = "🏠 Start"
 
 with st.sidebar:
-    st.session_state.setdefault("show_context_help", bool(get_ui_pref("show_context_help", True)))
-    st.session_state.setdefault("ui_mode", str(get_ui_pref("ui_mode", "Profi")))
-    st.session_state.setdefault("compact_mode", bool(get_ui_pref("compact_mode", False)))
+    st.session_state.setdefault("show_context_help", True)
+    st.session_state.setdefault("ui_mode", "Profi")
+    st.session_state.setdefault("compact_mode", False)
     if AUTO_LOGIN_TRUSTED_DEVICE:
         st.info("✅ Auto-Login aktiv")
     else:
@@ -7903,12 +7836,6 @@ with st.sidebar:
     if st.session_state.get("last_auto_backup_skipped_reason"):
         st.caption(f"Backup-Optimierung: {st.session_state.get('last_auto_backup_skipped_reason')}")
     st.caption(f"Baseline: {APP_BASELINE_ID} | Version: {APP_SHORT_VERSION} | Modus: {ui_mode}")
-    update_ui_prefs(
-        show_context_help=bool(st.session_state.get("show_context_help", True)),
-        ui_mode=str(st.session_state.get("ui_mode", "Profi")),
-        compact_mode=bool(st.session_state.get("compact_mode", False)),
-        show_system_status_panel=bool(st.session_state.get("show_system_status_panel", False)),
-    )
 
 menu = st.session_state["active_menu"]
 update_recent_menus(menu)
