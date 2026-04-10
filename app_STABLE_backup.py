@@ -47,6 +47,8 @@ import logging
 import time
 import socket
 import io
+import hashlib
+import uuid
 import base64
 import urllib.request
 import urllib.error
@@ -55,15 +57,15 @@ import urllib.parse
 warnings.filterwarnings("ignore")
 logging.getLogger("streamlit").setLevel(logging.ERROR)
 
-APP_VERSION = "DJ Tool V16 - Heute auflegen + DJ Memory PRO"
-APP_SHORT_VERSION = "V16"
+APP_VERSION = "DJ Tool V15 - Komfort & Speed"
+APP_SHORT_VERSION = "V15"
 APP_BUILD_DATE = "2026-04-08"
-APP_BUILD_TIME = "15:45"
-APP_BUILD_SOURCE = "V10 Basis + korrigierter Runtime-Pfad für zuletzt importierte Playlists"
+APP_BUILD_TIME = "11:10"
+APP_BUILD_SOURCE = "V14.2 stabil + Komfort/Speed/Start-Optimierung"
 APP_BASELINE_ID = "djtool_master_baseline_v1"
 LOGIN_ENABLED = True
 AUTO_LOGIN_TRUSTED_DEVICE = True
-APP_LOGIN_PASSWORD = "Marcel1504"
+APP_LOGIN_PASSWORD = os.environ.get("DJ_TOOL_LOGIN_PASSWORD", "Marcel1504")
 SOURCE_MASTER_BUILD = "V129"
 MASTER_BUILD_RULE = "Neue Versionen nur auf der letzten funktionierenden Version aufbauen"
 RELEASE_GUARD_MANIFEST_DIR = "release_guard"
@@ -71,6 +73,13 @@ RELEASE_GUARD_AUTO_WRITE = True
 REQUIRE_SAFE_STORAGE_FOR_IMPORTS = True
 
 BUILD_NOTES = [
+    "V15 bringt schnelleren Start ohne pip bei jedem Tool-Start",
+    "V15 ergänzt leisen Start ohne sichtbares CMD-Fenster per VBS-Launcher",
+    "V15 macht Systemstatus/Release-Guard optional statt bei jedem Start",
+    "V15 merkt sich UI-Modus, Kompaktmodus und Hilfetexte dauerhaft",
+    "V153 verschlankt Deploy/Start mit echtem Launcher statt Warn-Seite",
+    "V153 reduziert Auto-Backup-Last durch Cooldown + Limitierung",
+    "V153 beschleunigt zuletzt importierte Playlists per SQL-JOIN statt N+1-Queries",
     "V10.1.3 fixt die zuletzt importierten Playlists für bestehende Datenbanken ohne playlist_id in import_runs",
     "V10.1 zeigt zuletzt importierte Playlists global mit 10/20/50 Auswahl",
     "V10.1 erlaubt direktes Öffnen und Analysieren aus der Import-Historie",
@@ -114,6 +123,8 @@ BUILD_NOTES = [
 ]
 
 CHANGELOG = [
+    {"version": "V15", "date": "2026-04-09", "new": ["Schneller Start", "Leiser VBS-Launcher", "persistente UI-Einstellungen"], "fixes": ["kein pip bei jedem Start", "Systemstatus nur bei Bedarf laden", "ruhigere Sidebar und Start-Ansicht"]},
+    {"version": "V153", "date": "2026-04-08", "new": ["Launcher-Fix", "Backup-Cooldown", "Import-JOIN-Cache", "Env-Login-Passwort"], "fixes": ["Docker startet wieder direkt in die echte App", "weniger ZIP-I/O bei vielen Änderungen", "schnellere zuletzt importierte Playlists", "robustere DB-Migration für genre-Index"]},
     {"version": "V10.1.3", "date": "2026-04-07", "new": ["Zuletzt importierte Playlists global", "Direkt öffnen/analysieren", "10/20/50 Auswahl"], "fixes": ["SQL-Fix für bestehende import_runs Tabellen ohne playlist_id", "klare Versionsanzeige", "sichtbarer Menüpunkt im Live-Pfad"]},
     {"version": "V10.1", "date": "2026-04-07", "new": ["Zuletzt importierte Playlists global", "Direkt öffnen", "Direkt analysieren"], "fixes": ["letzte 10/20/50 sichtbar", "Import-Historie dauerhaft nutzbar", "schneller Rücksprung zu Browser/Analyse Hub"]},
     {"version": "V10", "date": "2026-04-04", "new": ["Einfach/Profi-Modus", "Schnell-Workflow", "Kompaktmodus"], "fixes": ["klarerer Einstieg", "ruhigere Sidebar", "Abschlussversion mit sichtbarer V10-Kennung"]},
@@ -228,6 +239,44 @@ SET_FILE = str(APP_DATA_DIR / "saved_sets.json")
 BACKUP_DIR = APP_DATA_DIR / "backups"
 BACKUP_DIR.mkdir(parents=True, exist_ok=True)
 STORAGE_INFO_FILE = APP_DATA_DIR / "storage_info.json"
+UI_PREFS_FILE = APP_DATA_DIR / "ui_prefs.json"
+AUTO_BACKUP_COOLDOWN_SECONDS = int(os.environ.get("DJ_TOOL_AUTO_BACKUP_COOLDOWN", "45"))
+
+
+def load_ui_prefs() -> dict:
+    try:
+        if UI_PREFS_FILE.exists():
+            data = json.loads(UI_PREFS_FILE.read_text(encoding="utf-8"))
+            if isinstance(data, dict):
+                return data
+    except Exception:
+        pass
+    return {}
+
+
+def save_ui_prefs(data: dict):
+    try:
+        UI_PREFS_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception:
+        pass
+
+
+def get_ui_pref(key: str, default=None):
+    prefs = load_ui_prefs()
+    return prefs.get(key, default)
+
+
+def update_ui_prefs(**kwargs):
+    prefs = load_ui_prefs()
+    changed = False
+    for key, value in kwargs.items():
+        if prefs.get(key) != value:
+            prefs[key] = value
+            changed = True
+    if changed:
+        save_ui_prefs(prefs)
+
+MAX_AUTO_BACKUP_FILES = int(os.environ.get("DJ_TOOL_MAX_AUTO_BACKUPS", "20"))
 SOURCE_PRESETS = ["Benjamin Schneider", "Michael Zimmermann", "Global", "Reverenz"]
 EVENT_IMPORT_PRESETS = ["Hochzeit", "Geburtstag", "Party", "Firmenfeier", "Fasching", "80s", "90s", "90er-2000er", "2000s", "2010s", "Mixed", "Schlager", "Rock", "Latin"]
 
@@ -237,6 +286,11 @@ DROPBOX_REFRESH_TOKEN_ENV_NAME = "DROPBOX_REFRESH_TOKEN"
 DROPBOX_APP_KEY_ENV_NAME = "DROPBOX_APP_KEY"
 DROPBOX_APP_SECRET_ENV_NAME = "DROPBOX_APP_SECRET"
 DROPBOX_STARTUP_RESTORE_ENABLED = True
+SYNC_GUARD_FILENAME = ".dj_tool_sync_guard.json"
+SYNC_GUARD_STALE_SECONDS = int(os.environ.get("DJ_TOOL_SYNC_GUARD_STALE_SECONDS", "1800"))
+SYNC_GUARD_HEARTBEAT_SECONDS = int(os.environ.get("DJ_TOOL_SYNC_GUARD_HEARTBEAT_SECONDS", "45"))
+SYNC_AUTO_REFRESH_SECONDS = int(os.environ.get("DJ_TOOL_SYNC_AUTO_REFRESH_SECONDS", "60"))
+SYNC_AUTO_BACKUP_SECONDS = int(os.environ.get("DJ_TOOL_SYNC_AUTO_BACKUP_SECONDS", "300"))
 
 SUPABASE_URL_ENV_NAME = "SUPABASE_URL"
 SUPABASE_KEY_ENV_NAME = "SUPABASE_KEY"
@@ -1046,6 +1100,27 @@ def build_full_backup_zip_bytes():
     return backup_buffer.getvalue()
 
 
+def _prune_old_backups(max_files: int = MAX_AUTO_BACKUP_FILES):
+    try:
+        files = sorted(BACKUP_DIR.glob("*.zip"), key=lambda x: x.stat().st_mtime, reverse=True)
+        for old_file in files[int(max_files):]:
+            old_file.unlink(missing_ok=True)
+    except Exception:
+        pass
+
+
+def should_run_auto_backup(reason: str = "autosave") -> bool:
+    now_ts = time.time()
+    last_ts = float(st.session_state.get("last_auto_backup_ts", 0) or 0)
+    last_reason = str(st.session_state.get("last_auto_backup_reason", "") or "")
+    cooldown = max(0, int(AUTO_BACKUP_COOLDOWN_SECONDS or 0))
+    if cooldown and last_ts and (now_ts - last_ts) < cooldown and last_reason == str(reason or ""):
+        st.session_state["last_auto_backup_skipped_reason"] = f"Cooldown aktiv ({cooldown}s)"
+        return False
+    st.session_state["last_auto_backup_skipped_reason"] = ""
+    return True
+
+
 def create_timestamped_backup_file(reason: str = "manual") -> str:
     BACKUP_DIR.mkdir(parents=True, exist_ok=True)
     safe_reason = re.sub(r"[^a-z0-9_-]+", "_", str(reason or "manual").strip().lower()).strip("_") or "manual"
@@ -1054,14 +1129,18 @@ def create_timestamped_backup_file(reason: str = "manual") -> str:
     backup_path = BACKUP_DIR / backup_name
     with open(backup_path, "wb") as f:
         f.write(build_full_backup_zip_bytes())
+    _prune_old_backups()
     return str(backup_path)
 
 
 def auto_backup_after_data_change(reason: str = "autosave"):
+    if not should_run_auto_backup(reason=reason):
+        return str(st.session_state.get("last_auto_backup_path", "") or "")
     try:
         path = create_timestamped_backup_file(reason=reason)
         st.session_state["last_auto_backup_path"] = path
         st.session_state["last_auto_backup_reason"] = reason
+        st.session_state["last_auto_backup_ts"] = time.time()
         maybe_auto_sync_latest_backup_to_supabase(path, reason=reason)
         maybe_auto_sync_latest_backup_to_dropbox(path, reason=reason)
         return path
@@ -1760,6 +1839,197 @@ def reset_live_database_files():
     return ok
 
 
+def get_runtime_device_name() -> str:
+    explicit = str(os.environ.get("DJ_TOOL_DEVICE_NAME") or "").strip()
+    if explicit:
+        return explicit
+    base = str(socket.gethostname() or "DJ-Tool").strip() or "DJ-Tool"
+    if os.environ.get("RENDER") or os.environ.get("RENDER_SERVICE_ID"):
+        return f"{base}-WEB"
+    return base
+
+
+def get_runtime_session_id() -> str:
+    sid = str(st.session_state.get("runtime_session_id") or "").strip()
+    if sid:
+        return sid
+    sid = uuid.uuid4().hex
+    st.session_state["runtime_session_id"] = sid
+    return sid
+
+
+def get_sync_guard_remote_path() -> str:
+    return build_dropbox_remote_path(SYNC_GUARD_FILENAME)
+
+
+def read_dropbox_sync_guard() -> dict:
+    token = get_dropbox_access_token()
+    if not token:
+        return {}
+    remote_path = get_sync_guard_remote_path()
+    try:
+        raw = download_dropbox_backup_bytes(remote_path)
+        payload = json.loads(raw.decode("utf-8", errors="ignore") or "{}")
+        return payload if isinstance(payload, dict) else {}
+    except Exception as e:
+        st.session_state["sync_guard_last_read_error"] = str(e)
+        return {}
+
+
+def write_dropbox_sync_guard(payload: dict) -> dict:
+    token = get_dropbox_access_token()
+    if not token:
+        return {}
+    data = json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")
+    result = upload_backup_bytes_to_dropbox(data, SYNC_GUARD_FILENAME, mode="overwrite")
+    st.session_state["sync_guard_last_written_payload"] = payload
+    st.session_state["sync_guard_last_written_at"] = time.time()
+    st.session_state["sync_guard_last_written_remote"] = result.get("path_display") or result.get("path_lower") or ""
+    return result
+
+
+def sync_guard_is_stale(payload: dict) -> bool:
+    try:
+        updated_ts = float(payload.get("updated_ts") or 0)
+    except Exception:
+        updated_ts = 0
+    if not updated_ts:
+        return True
+    return (time.time() - updated_ts) > max(60, int(SYNC_GUARD_STALE_SECONDS or 0))
+
+
+def build_sync_guard_payload(p_count: int = 0, t_count: int = 0) -> dict:
+    owner = get_runtime_device_name()
+    sid = get_runtime_session_id()
+    return {
+        "device_name": owner,
+        "session_id": sid,
+        "updated_ts": time.time(),
+        "updated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "runtime": "web" if (os.environ.get("RENDER") or os.environ.get("RENDER_SERVICE_ID")) else "local",
+        "playlists": int(p_count or 0),
+        "tracks": int(t_count or 0),
+        "owner_hash": hashlib.sha1(f"{owner}:{sid}".encode("utf-8")).hexdigest()[:10],
+    }
+
+
+def acquire_sync_guard(force: bool = False, p_count: int = 0, t_count: int = 0) -> dict:
+    owner = get_runtime_device_name()
+    sid = get_runtime_session_id()
+    remote = read_dropbox_sync_guard()
+    owns = False
+    blocking = False
+    reason = ""
+    if not get_dropbox_access_token():
+        st.session_state["sync_guard_status"] = {"owns": True, "blocking": False, "reason": "Kein Dropbox-Token", "remote": {}}
+        return st.session_state["sync_guard_status"]
+    remote_session = str(remote.get("session_id") or "").strip()
+    remote_device = str(remote.get("device_name") or "").strip()
+    stale = sync_guard_is_stale(remote) if remote else True
+    if force or (not remote) or stale or (remote_session == sid) or (remote_device == owner):
+        payload = build_sync_guard_payload(p_count=p_count, t_count=t_count)
+        try:
+            write_dropbox_sync_guard(payload)
+            remote = payload
+            owns = True
+            reason = "aktiv" if not force else "übernommen"
+        except Exception as e:
+            reason = f"Write fehlgeschlagen: {e}"
+    else:
+        blocking = True
+        reason = f"Aktiv auf {remote_device or '-'} seit {remote.get('updated_at') or '-'}"
+    status = {
+        "owns": owns,
+        "blocking": blocking,
+        "reason": reason,
+        "remote": remote,
+        "stale": stale,
+        "owner": owner,
+        "session_id": sid,
+    }
+    st.session_state["sync_guard_status"] = status
+    return status
+
+
+def refresh_sync_guard_heartbeat(p_count: int = 0, t_count: int = 0):
+    status = st.session_state.get("sync_guard_status") or {}
+    if not status.get("owns"):
+        return
+    now_ts = time.time()
+    last_ts = float(st.session_state.get("sync_guard_last_heartbeat_ts") or 0)
+    if last_ts and (now_ts - last_ts) < max(15, int(SYNC_GUARD_HEARTBEAT_SECONDS or 0)):
+        return
+    try:
+        payload = build_sync_guard_payload(p_count=p_count, t_count=t_count)
+        write_dropbox_sync_guard(payload)
+        st.session_state["sync_guard_last_heartbeat_ts"] = now_ts
+    except Exception as e:
+        st.session_state["sync_guard_last_heartbeat_error"] = str(e)
+
+
+def maybe_periodic_sync_backup():
+    if not get_dropbox_access_token():
+        return
+    status = st.session_state.get("sync_guard_status") or {}
+    if status and not status.get("owns"):
+        return
+    now_ts = time.time()
+    last_ts = float(st.session_state.get("last_periodic_sync_backup_ts") or 0)
+    if last_ts and (now_ts - last_ts) < max(60, int(SYNC_AUTO_BACKUP_SECONDS or 0)):
+        return
+    try:
+        playlist_count, track_count = get_sqlite_playlist_track_counts(DB_PATH)
+        if playlist_count <= 0 and track_count <= 0:
+            return
+        path = create_timestamped_backup_file(reason="sync_interval")
+        maybe_auto_sync_latest_backup_to_dropbox(path, reason="sync_interval")
+        st.session_state["last_periodic_sync_backup_ts"] = now_ts
+    except Exception as e:
+        st.session_state["last_periodic_sync_backup_error"] = str(e)
+
+
+def render_sync_guard_panel(p_count: int = 0, t_count: int = 0):
+    if not get_dropbox_access_token():
+        return
+    current_status = st.session_state.get("sync_guard_status") or acquire_sync_guard(p_count=p_count, t_count=t_count)
+    remote = current_status.get("remote") or {}
+    active_device = str(remote.get("device_name") or get_runtime_device_name())
+    stamp = str(remote.get("updated_at") or "-")
+    owner_text = f"🔒 Aktiv: {active_device} · {stamp}"
+    if current_status.get("blocking"):
+        st.warning(owner_text)
+        if st.button("🔓 Lock übernehmen", key="takeover_sync_guard_btn", width="stretch"):
+            acquire_sync_guard(force=True, p_count=p_count, t_count=t_count)
+            st.rerun()
+    else:
+        st.success(owner_text)
+    st.caption(f"Dieses Gerät: {get_runtime_device_name()} · Auto-Refresh {SYNC_AUTO_REFRESH_SECONDS}s")
+    if st.session_state.get("sync_guard_last_heartbeat_error"):
+        st.caption(f"Heartbeat: {st.session_state.get('sync_guard_last_heartbeat_error')}")
+
+
+def inject_sync_auto_refresh():
+    if max(0, int(SYNC_AUTO_REFRESH_SECONDS or 0)) <= 0:
+        return
+    if not get_dropbox_access_token():
+        return
+    seconds = max(20, int(SYNC_AUTO_REFRESH_SECONDS or 0))
+    components.html(
+        f"""
+        <script>
+        const seconds = {seconds};
+        if (!window.__djtool_sync_reload) {{
+          window.__djtool_sync_reload = true;
+          setTimeout(function() {{
+            window.parent.location.reload();
+          }}, seconds * 1000);
+        }}
+        </script>
+        """,
+        height=0,
+    )
+
+
 def render_backup_restore_page():
     st.header("Backup / Restore")
     st.caption("Hier kannst du dein komplettes Daten-Backup herunterladen, lokal wiederherstellen und optional direkt mit Supabase oder Dropbox synchronisieren.")
@@ -2014,6 +2284,19 @@ def get_conn():
     return conn
 
 
+def ensure_column_exists(table_name, column_name, column_definition):
+    conn = get_conn()
+    try:
+        cur = conn.cursor()
+        cur.execute(f"PRAGMA table_info({table_name})")
+        columns = {row[1] for row in cur.fetchall()}
+        if column_name not in columns:
+            cur.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_definition}")
+            conn.commit()
+    finally:
+        conn.close()
+
+
 def init_db():
     conn = get_conn()
     cur = conn.cursor()
@@ -2066,6 +2349,9 @@ def init_db():
             category TEXT DEFAULT '',
             tags TEXT DEFAULT '',
             usage_context TEXT DEFAULT '',
+            source_name TEXT DEFAULT '',
+            genre_name TEXT DEFAULT '',
+            event_name TEXT DEFAULT '',
             playlist_name TEXT DEFAULT '',
             playlist_id INTEGER DEFAULT 0,
             created_at TEXT DEFAULT CURRENT_TIMESTAMP
@@ -2080,6 +2366,12 @@ def init_db():
         cur.execute("ALTER TABLE saved_combos ADD COLUMN tags TEXT DEFAULT ''")
     if "usage_context" not in saved_combo_cols:
         cur.execute("ALTER TABLE saved_combos ADD COLUMN usage_context TEXT DEFAULT ''")
+    if "source_name" not in saved_combo_cols:
+        cur.execute("ALTER TABLE saved_combos ADD COLUMN source_name TEXT DEFAULT ''")
+    if "genre_name" not in saved_combo_cols:
+        cur.execute("ALTER TABLE saved_combos ADD COLUMN genre_name TEXT DEFAULT ''")
+    if "event_name" not in saved_combo_cols:
+        cur.execute("ALTER TABLE saved_combos ADD COLUMN event_name TEXT DEFAULT ''")
     if "playlist_name" not in saved_combo_cols:
         cur.execute("ALTER TABLE saved_combos ADD COLUMN playlist_name TEXT DEFAULT ''")
     if "playlist_id" not in saved_combo_cols:
@@ -2164,12 +2456,16 @@ def init_db():
     cur.execute("CREATE INDEX IF NOT EXISTS idx_playlists_created_at ON playlists(created_at DESC)")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_playlist_tracks_playlist_position ON playlist_tracks(playlist_id, position)")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_playlist_tracks_normalized_name ON playlist_tracks(normalized_name)")
+    ensure_column_exists("playlists", "genre", "TEXT DEFAULT ''")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_import_runs_created_at ON import_runs(created_at DESC)")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_playlists_genre ON playlists(genre)")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_import_runs_signature ON import_runs(signature)")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_saved_combos_type ON saved_combos(combo_type)")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_saved_combos_category ON saved_combos(category)")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_saved_combos_context ON saved_combos(usage_context)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_saved_combos_source ON saved_combos(source_name)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_saved_combos_genre ON saved_combos(genre_name)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_saved_combos_event ON saved_combos(event_name)")
 
     conn.commit()
     conn.close()
@@ -2201,7 +2497,9 @@ def log_import_run(import_type: str, playlist_name: str, event: str, source: str
         except Exception:
             pass
 
+@st.cache_data(ttl=20, show_spinner=False)
 def get_recent_import_runs(limit: int = 20):
+    conn = None
     try:
         conn = get_conn()
         cur = conn.cursor()
@@ -2212,14 +2510,15 @@ def get_recent_import_runs(limit: int = 20):
             LIMIT ?
         """, (int(limit),))
         rows = cur.fetchall()
-        conn.close()
         return rows
     except Exception:
-        try:
-            conn.close()
-        except Exception:
-            pass
         return []
+    finally:
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
 
 def get_import_log_stats() -> dict:
     rows = get_recent_import_runs(limit=200)
@@ -2296,18 +2595,34 @@ def _get_recent_imported_playlists_cached(limit: int):
     try:
         cur = conn.cursor()
         cur.execute("""
-            SELECT id, created_at, import_type, playlist_name, event, sub_event, source, track_count, status, note
-            FROM import_runs
-            WHERE status = 'ok'
-            ORDER BY id DESC
+            SELECT
+                ir.id,
+                ir.created_at,
+                ir.import_type,
+                ir.playlist_name,
+                ir.event,
+                ir.sub_event,
+                ir.source,
+                ir.track_count,
+                ir.status,
+                ir.note,
+                COALESCE(MAX(p.id), 0) AS playlist_id
+            FROM import_runs ir
+            LEFT JOIN playlists p
+              ON p.name = ir.playlist_name
+             AND COALESCE(p.event, '') = COALESCE(ir.event, '')
+             AND COALESCE(p.sub_event, '') = COALESCE(ir.sub_event, '')
+             AND COALESCE(p.source, '') = COALESCE(ir.source, '')
+            WHERE ir.status = 'ok'
+            GROUP BY ir.id, ir.created_at, ir.import_type, ir.playlist_name, ir.event, ir.sub_event, ir.source, ir.track_count, ir.status, ir.note
+            ORDER BY ir.id DESC
             LIMIT ?
         """, (int(limit),))
         rows = cur.fetchall()
     finally:
         conn.close()
     prepared = []
-    for run_id, created_at, import_type, playlist_name, event, sub_event, source, track_count, status, note in rows:
-        resolved_playlist_id = find_playlist_id_for_import_entry(playlist_name, event, sub_event, source) or 0
+    for run_id, created_at, import_type, playlist_name, event, sub_event, source, track_count, status, note, playlist_id in rows:
         prepared.append({
             "run_id": int(run_id),
             "created_at": created_at or "-",
@@ -2320,7 +2635,7 @@ def _get_recent_imported_playlists_cached(limit: int):
             "track_count": int(track_count or 0),
             "status": status or "ok",
             "note": note or "",
-            "playlist_id": resolved_playlist_id,
+            "playlist_id": int(playlist_id or 0),
         })
     return prepared
 
@@ -3555,6 +3870,113 @@ def get_library_overview_cached():
 def get_library_overview():
     return get_library_overview_cached()
 
+
+def is_reference_source_label(value: str) -> bool:
+    value = str(value or '').strip().casefold()
+    return any(token in value for token in ['referenz', 'reference', 'premium', 'best-of', 'best of'])
+
+
+@st.cache_data(ttl=20, show_spinner=False)
+def get_filtered_playlist_snapshot(event=None, source=None, top_only=False, sub_event=None, limit: int = 8):
+    conn = get_conn()
+    try:
+        cur = conn.cursor()
+        query = [
+            "SELECT id, name, event, sub_event, source, is_top, created_at, COALESCE(upload_note, '')",
+            "FROM playlists",
+            "WHERE 1=1",
+        ]
+        params = []
+        if event and event != 'Alle':
+            query.append('AND event = ?')
+            params.append(event)
+        if source and source != 'Alle':
+            query.append('AND source = ?')
+            params.append(source)
+        if sub_event and sub_event != 'Alle':
+            query.append('AND sub_event = ?')
+            params.append(sub_event)
+        if top_only:
+            query.append('AND is_top = 1')
+        query.append('ORDER BY id DESC LIMIT ?')
+        params.append(int(limit))
+        cur.execute(" ".join(query), params)
+        rows = cur.fetchall()
+
+        count_query = ["SELECT COUNT(*) FROM playlists WHERE 1=1"]
+        count_params = []
+        if event and event != 'Alle':
+            count_query.append('AND event = ?')
+            count_params.append(event)
+        if source and source != 'Alle':
+            count_query.append('AND source = ?')
+            count_params.append(source)
+        if sub_event and sub_event != 'Alle':
+            count_query.append('AND sub_event = ?')
+            count_params.append(sub_event)
+        if top_only:
+            count_query.append('AND is_top = 1')
+        cur.execute(" ".join(count_query), count_params)
+        total = int(cur.fetchone()[0] or 0)
+    finally:
+        conn.close()
+
+    latest = []
+    for pid, name, ev, sub_ev, src, is_top, created_at, upload_note in rows:
+        latest.append({
+            'playlist_id': int(pid),
+            'name': str(name or '-'),
+            'event_label': format_event_label(ev, sub_ev) or '-',
+            'source': str(src or '-'),
+            'is_top': bool(is_top),
+            'created_at': created_at or '-',
+            'upload_note': str(upload_note or '').strip(),
+        })
+    return {'total': total, 'latest': latest}
+
+
+def get_track_example_playlists(query_track, event=None, source=None, top_only=False, sub_event=None, limit: int = 6):
+    norm_query = normalize_track_text(query_track)
+    if not norm_query:
+        return []
+    conn = get_conn()
+    try:
+        cur = conn.cursor()
+        query = [
+            "SELECT DISTINCT p.id, p.name, p.event, p.sub_event, p.source, p.created_at",
+            "FROM playlists p",
+            "JOIN playlist_tracks t ON p.id = t.playlist_id",
+            "WHERE LOWER(COALESCE(t.normalized_name, '')) LIKE ?",
+        ]
+        params = [f'%{norm_query}%']
+        if event and event != 'Alle':
+            query.append('AND p.event = ?')
+            params.append(event)
+        if source and source != 'Alle':
+            query.append('AND p.source = ?')
+            params.append(source)
+        if sub_event and sub_event != 'Alle':
+            query.append('AND p.sub_event = ?')
+            params.append(sub_event)
+        if top_only:
+            query.append('AND p.is_top = 1')
+        query.append('ORDER BY p.id DESC LIMIT ?')
+        params.append(int(limit))
+        cur.execute(" ".join(query), params)
+        rows = cur.fetchall()
+    finally:
+        conn.close()
+    return [
+        {
+            'playlist_id': int(pid),
+            'name': str(name or '-'),
+            'event_label': format_event_label(ev, sub_ev) or '-',
+            'source': str(src or '-'),
+            'created_at': created_at or '-',
+        }
+        for pid, name, ev, sub_ev, src, created_at in rows
+    ]
+
 def compute_data(event=None, source=None, top_only=False, sub_event=None):
     conn = get_conn()
     cur = conn.cursor()
@@ -4216,12 +4638,12 @@ def _normalize_tag_text(value: str) -> str:
     return ", ".join(clean)
 
 
-def save_combo(combo_type, combo_text, source_track="", note="", category="", tags="", usage_context="", playlist_name="", playlist_id=0):
+def save_combo(combo_type, combo_text, source_track="", note="", category="", tags="", usage_context="", source_name="", genre_name="", event_name="", playlist_name="", playlist_id=0):
     conn = get_conn()
     cur = conn.cursor()
     cur.execute("""
-        INSERT INTO saved_combos(combo_type, combo_text, source_track, note, category, tags, usage_context, playlist_name, playlist_id)
-        VALUES(?,?,?,?,?,?,?,?,?)
+        INSERT INTO saved_combos(combo_type, combo_text, source_track, note, category, tags, usage_context, source_name, genre_name, event_name, playlist_name, playlist_id)
+        VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
     """, (
         str(combo_type or "").strip(),
         str(combo_text or "").strip(),
@@ -4230,6 +4652,9 @@ def save_combo(combo_type, combo_text, source_track="", note="", category="", ta
         str(category or "").strip(),
         _normalize_tag_text(tags),
         str(usage_context or "").strip(),
+        str(source_name or "").strip(),
+        str(genre_name or "").strip(),
+        str(event_name or "").strip(),
         str(playlist_name or "").strip(),
         int(playlist_id or 0),
     ))
@@ -4238,11 +4663,11 @@ def save_combo(combo_type, combo_text, source_track="", note="", category="", ta
     auto_backup_after_data_change("combo_save")
 
 
-def get_saved_combos(combo_type="Alle", category="", tag="", usage_context="", query_text=""):
+def get_saved_combos(combo_type="Alle", category="", tag="", usage_context="", source_name="", genre_name="", event_name="", query_text=""):
     conn = get_conn()
     cur = conn.cursor()
     sql = """
-        SELECT id, combo_type, combo_text, source_track, note, category, tags, usage_context, playlist_name, playlist_id, created_at
+        SELECT id, combo_type, combo_text, source_track, note, category, tags, usage_context, source_name, genre_name, event_name, playlist_name, playlist_id, created_at
         FROM saved_combos
         WHERE 1=1
     """
@@ -4259,10 +4684,19 @@ def get_saved_combos(combo_type="Alle", category="", tag="", usage_context="", q
     if str(usage_context or "").strip():
         sql += " AND LOWER(COALESCE(usage_context,'')) = ?"
         params.append(str(usage_context).strip().casefold())
+    if str(source_name or "").strip():
+        sql += " AND LOWER(COALESCE(source_name,'')) = ?"
+        params.append(str(source_name).strip().casefold())
+    if str(genre_name or "").strip():
+        sql += " AND LOWER(COALESCE(genre_name,'')) = ?"
+        params.append(str(genre_name).strip().casefold())
+    if str(event_name or "").strip():
+        sql += " AND LOWER(COALESCE(event_name,'')) = ?"
+        params.append(str(event_name).strip().casefold())
     if str(query_text or "").strip():
         q = f"%{str(query_text).strip().casefold()}%"
-        sql += " AND (LOWER(COALESCE(combo_text,'')) LIKE ? OR LOWER(COALESCE(note,'')) LIKE ? OR LOWER(COALESCE(category,'')) LIKE ? OR LOWER(COALESCE(tags,'')) LIKE ? OR LOWER(COALESCE(usage_context,'')) LIKE ? OR LOWER(COALESCE(playlist_name,'')) LIKE ?)"
-        params.extend([q, q, q, q, q, q])
+        sql += " AND (LOWER(COALESCE(combo_text,'')) LIKE ? OR LOWER(COALESCE(note,'')) LIKE ? OR LOWER(COALESCE(category,'')) LIKE ? OR LOWER(COALESCE(tags,'')) LIKE ? OR LOWER(COALESCE(usage_context,'')) LIKE ? OR LOWER(COALESCE(source_name,'')) LIKE ? OR LOWER(COALESCE(genre_name,'')) LIKE ? OR LOWER(COALESCE(event_name,'')) LIKE ? OR LOWER(COALESCE(playlist_name,'')) LIKE ?)"
+        params.extend([q, q, q, q, q, q, q, q, q])
     sql += " ORDER BY id DESC"
     cur.execute(sql, params)
     rows = cur.fetchall()
@@ -4314,6 +4748,38 @@ def get_saved_combo_contexts():
     return out
 
 
+def _get_saved_combo_distinct_values(column_name: str):
+    conn = get_conn()
+    cur = conn.cursor()
+    try:
+        cur.execute(f"SELECT {column_name} FROM saved_combos WHERE TRIM(COALESCE({column_name},'')) <> '' ORDER BY {column_name}")
+        rows = [r[0] for r in cur.fetchall()]
+    except Exception:
+        rows = []
+    conn.close()
+    out = []
+    seen = set()
+    for value in rows:
+        clean = str(value or "").strip()
+        key = clean.casefold()
+        if key and key not in seen:
+            seen.add(key)
+            out.append(clean)
+    return out
+
+
+def get_saved_combo_sources():
+    return _get_saved_combo_distinct_values("source_name")
+
+
+def get_saved_combo_genres():
+    return _get_saved_combo_distinct_values("genre_name")
+
+
+def get_saved_combo_events():
+    return _get_saved_combo_distinct_values("event_name")
+
+
 def get_saved_combo_tags():
     conn = get_conn()
     cur = conn.cursor()
@@ -4349,7 +4815,6 @@ def strength_label(cnt):
 
 
 
-@st.cache_data(ttl=60, show_spinner=False)
 @st.cache_data(ttl=120, show_spinner=False)
 def get_all_playlist_sequences():
     conn = get_conn()
@@ -5491,6 +5956,37 @@ def render_start_screen(p_count: int, t_count: int, l_count: int, c_count: int):
     st.caption("Der Upload bleibt wie bisher direkt im Tool. Von hier springst du nur schneller in den passenden Arbeitsbereich.")
     render_v10_quickflow_box()
 
+    wf1, wf2, wf3, wf4 = st.columns(4)
+    with wf1:
+        st.markdown("### 🎧 Set vorbereiten")
+        st.caption("Direkt zu Event, Herkunft, Top Songs, Übergängen und Blöcken.")
+        jump_button("Jetzt Set vorbereiten", "Event vorbereiten", key="home_wf_prepare")
+    with wf2:
+        st.markdown("### 🔍 Playlist analysieren")
+        st.caption("Einzelne Playlist prüfen oder im Analyse Hub aus echten Daten lernen.")
+        a, b = st.columns(2)
+        with a:
+            jump_button("Analyse Hub", "Analyse Hub", key="home_wf_hub")
+        with b:
+            jump_button("Playlists", "Playlists durchsuchen", key="home_wf_browse")
+    with wf3:
+        st.markdown("### ⭐ Referenz nutzen")
+        st.caption("Referenz-/Top-Playlists schneller öffnen und gezielt als Best-of nutzen.")
+        if st.button("Referenz öffnen", key="home_wf_reference", width="stretch"):
+            st.session_state["browse_source"] = "Referenz"
+            st.session_state["browse_sort"] = "Neueste zuerst"
+            st.session_state["browse_top"] = False
+            set_active_menu("Playlists durchsuchen")
+            st.rerun()
+    with wf4:
+        st.markdown("### 🔥 Inspiration holen")
+        st.caption("Davor/Danach, starke Blöcke, Rollen und Timing für echte DJ-Muster.")
+        a, b = st.columns(2)
+        with a:
+            jump_button("Heute auflegen", "Heute auflegen", key="home_wf_today")
+        with b:
+            jump_button("KI Rollen", "KI Rollen & Timing", key="home_wf_roles")
+
     t1, t2, t3, t4 = st.columns(4)
     t1.metric("Playlists", p_count)
     t2.metric("Tracks", t_count)
@@ -5932,18 +6428,28 @@ def compare_release_guard_snapshots(previous: dict | None, current: dict):
     return summary
 
 
-def build_release_guard_report(write_current: bool = True):
+@st.cache_data(ttl=180, show_spinner=False)
+def build_release_guard_report_cached():
     current = _feature_snapshot_from_selftests()
     stable = load_release_guard_manifest(_release_guard_stable_path())
+    return current, stable, compare_release_guard_snapshots(stable, current)
+
+
+def build_release_guard_report(write_current: bool = True):
+    current, stable, diff = build_release_guard_report_cached()
     if write_current and RELEASE_GUARD_AUTO_WRITE:
         _write_release_guard_manifest(current, _release_guard_current_path())
-    return current, stable, compare_release_guard_snapshots(stable, current)
+    return current, stable, diff
 
 
 def save_current_as_stable_baseline():
     current = _feature_snapshot_from_selftests()
     _write_release_guard_manifest(current, _release_guard_stable_path())
     _write_release_guard_manifest(current, _release_guard_current_path())
+    try:
+        build_release_guard_report_cached.clear()
+    except Exception:
+        pass
     return current
 
 
@@ -5998,6 +6504,7 @@ def render_release_guard_banner():
 def render_system_version_page():
     st.header("System / Version")
     st.caption("Hier siehst du Version, Historie, Fixes, Release Guard und den Selbsttest gegen die Master-Baseline.")
+    st.info("V15 Komfort: schnellerer Start, optionaler Systemstatus, dauerhafte UI-Einstellungen und leiser Start über VBS-Launcher.")
 
     a, b, c = st.columns(3)
     a.metric("Version", APP_VERSION)
@@ -7442,16 +7949,38 @@ def render_app_header():
     st.caption(f"Aktuelle Systemversion: {launcher_version} | aktualisiert am {APP_BUILD_DATE} {APP_BUILD_TIME} | Basis: {launcher_base}")
     st.caption(f"Core-Version: {APP_SHORT_VERSION}")
 
+maybe_restore_from_supabase_on_startup(force=False)
+maybe_restore_from_dropbox_on_startup(force=False)
+
 render_app_header()
 
 p_count, t_count, l_count, c_count = stats_counts()
+acquire_sync_guard(p_count=p_count, t_count=t_count)
+refresh_sync_guard_heartbeat(p_count=p_count, t_count=t_count)
+maybe_periodic_sync_backup()
+inject_sync_auto_refresh()
 ensure_build_snapshot_backup()
-with st.expander(f"System / Status ({p_count} Playlists • {t_count} Tracks)", expanded=False):
-    st.caption(f"Build: {APP_BUILD_DATE} · {APP_BUILD_TIME}")
-    st.caption(f"Quelle: {APP_BUILD_SOURCE}")
-    st.caption("Trusted Device Auto-Login bleibt aktiv. Neu in V104: Wenn Render nach einem Deploy leer startet, zieht das Tool automatisch das neueste Dropbox-Backup und stellt deine Daten wieder her.")
-    render_data_safety_status(p_count, t_count)
-    render_release_guard_banner()
+show_system_status_panel = bool(st.session_state.get("show_system_status_panel", get_ui_pref("show_system_status_panel", False)))
+st.session_state["show_system_status_panel"] = show_system_status_panel
+status_cols = st.columns([4, 1.2])
+status_cols[0].caption(f"Live-Bestand: {p_count} Playlists • {t_count} Tracks • {c_count} gemerkte Kombis")
+if show_system_status_panel:
+    if status_cols[1].button("🧾 Status ausblenden", key="hide_system_status_btn", width="stretch"):
+        st.session_state["show_system_status_panel"] = False
+        update_ui_prefs(show_system_status_panel=False)
+        st.rerun()
+    with st.expander(f"System / Status ({p_count} Playlists • {t_count} Tracks)", expanded=False):
+        st.caption(f"Build: {APP_BUILD_DATE} · {APP_BUILD_TIME}")
+        st.caption(f"Quelle: {APP_BUILD_SOURCE}")
+        st.caption("Systemstatus und Release Guard werden in V15 nur noch bei Bedarf geladen. Das macht den normalen Start ruhiger und schneller.")
+        render_data_safety_status(p_count, t_count)
+        render_release_guard_banner()
+else:
+    if status_cols[1].button("🧾 Status laden", key="show_system_status_btn", width="stretch"):
+        st.session_state["show_system_status_panel"] = True
+        update_ui_prefs(show_system_status_panel=True)
+        st.rerun()
+    st.caption("System / Status bleibt für schnelleren Start ausgeblendet. Bei Bedarf oben laden.")
 
 
 SIMPLE_MENU_OPTIONS = [
@@ -7513,9 +8042,9 @@ if st.session_state["active_menu"] not in MENU_OPTIONS:
     st.session_state["active_menu"] = "🏠 Start"
 
 with st.sidebar:
-    st.session_state.setdefault("show_context_help", True)
-    st.session_state.setdefault("ui_mode", "Profi")
-    st.session_state.setdefault("compact_mode", False)
+    st.session_state.setdefault("show_context_help", bool(get_ui_pref("show_context_help", True)))
+    st.session_state.setdefault("ui_mode", str(get_ui_pref("ui_mode", "Profi")))
+    st.session_state.setdefault("compact_mode", bool(get_ui_pref("compact_mode", False)))
     if AUTO_LOGIN_TRUSTED_DEVICE:
         st.info("✅ Auto-Login aktiv")
     else:
@@ -7527,9 +8056,10 @@ with st.sidebar:
     if st.button("📦 Backup", key="sidebar_backup_btn", width="stretch"):
         set_active_menu("Backup / Restore")
         st.rerun()
+    render_sync_guard_panel(p_count=p_count, t_count=t_count)
     st.markdown("## Navigation")
     ui_mode = st.radio("Ansicht", ["Einfach", "Profi"], horizontal=True, key="ui_mode")
-    compact_mode = st.checkbox("🧼 Kompaktmodus", key="compact_mode")
+    compact_mode = st.checkbox("🧼 Kompaktmodus", key="compact_mode", help="Blendet Hilfetexte aus und hält die Oberfläche ruhiger.")
     if compact_mode:
         st.session_state["show_context_help"] = False
     visible_menu_options = get_visible_menu_options()
@@ -7589,7 +8119,15 @@ with st.sidebar:
     st.checkbox("ℹ️ Bereichs-Hilfe anzeigen", key="show_context_help")
     st.caption("Start = klarer Einstieg. Upload bleibt unter 'Playlists importieren'.")
     st.caption("Kompaktmodus blendet Hilfetexte aus und macht die Oberfläche ruhiger.")
+    if st.session_state.get("last_auto_backup_skipped_reason"):
+        st.caption(f"Backup-Optimierung: {st.session_state.get('last_auto_backup_skipped_reason')}")
     st.caption(f"Baseline: {APP_BASELINE_ID} | Version: {APP_SHORT_VERSION} | Modus: {ui_mode}")
+    update_ui_prefs(
+        show_context_help=bool(st.session_state.get("show_context_help", True)),
+        ui_mode=str(st.session_state.get("ui_mode", "Profi")),
+        compact_mode=bool(st.session_state.get("compact_mode", False)),
+        show_system_status_panel=bool(st.session_state.get("show_system_status_panel", False)),
+    )
 
 menu = st.session_state["active_menu"]
 update_recent_menus(menu)
@@ -8289,6 +8827,9 @@ elif menu == "Playlists durchsuchen":
                             category=category,
                             tags=tags,
                             usage_context=usage_context,
+                            source_name=source,
+                            genre_name=genre,
+                            event_name=event_label,
                             playlist_name=name,
                             playlist_id=pid,
                         )
@@ -8631,6 +9172,20 @@ elif menu == "Analyse Hub":
 
     data = compute_data_cached(event=filter_event, source=filter_source, top_only=top_only, sub_event=filter_sub_event)
     total_tracks = sum(int(v or 0) for v in data["track_total_counts"].values())
+    snapshot = get_filtered_playlist_snapshot(event=filter_event, source=filter_source, top_only=top_only, sub_event=filter_sub_event, limit=6)
+
+    base_info = []
+    base_info.append(f"Basis: {snapshot['total']} passende Playlists")
+    if filter_event != 'Alle':
+        base_info.append(f"Anlass: {format_event_label(filter_event, filter_sub_event) if is_birthday_event(filter_event) else filter_event}")
+    if filter_source != 'Alle':
+        base_info.append(f"Herkunft: {filter_source}")
+    if top_only:
+        base_info.append("nur Top-Playlists")
+    st.info(" • ".join(base_info))
+    if is_reference_source_label(filter_source) or top_only:
+        st.caption("Referenz-/Top-Sicht aktiv: Neueste passende Playlists werden unten zuerst gezeigt, damit neue starke Sets schneller sichtbar sind.")
+
     m1, m2, m3, m4 = st.columns(4)
     m1.metric("Songs", len(data["track_total_counts"]))
     m2.metric("Übergänge", len(data["pair_counts"]))
@@ -8647,6 +9202,22 @@ elif menu == "Analyse Hub":
             f"{result['transitions']} Übergänge • {result['roles']} Rollen"
         )
         st.rerun()
+
+    with st.expander("🔎 Woraus lernt diese Ansicht gerade?", expanded=False):
+        st.caption("Damit das Tool nichts erfindet, siehst du hier die reale Basis der aktuellen Analyse.")
+        latest_rows = snapshot.get('latest', [])
+        if not latest_rows:
+            st.info("Für diese Filter gibt es aktuell keine passenden Playlists.")
+        else:
+            for row in latest_rows:
+                cols = st.columns([4.5, 1.5, 1.4])
+                cols[0].markdown(f"**{row['name']}**  \n{row['event_label']} | {row['source']}")
+                cols[1].caption(str(row['created_at']))
+                if cols[2].button("Öffnen", key=f"hub_proof_open_{row['playlist_id']}", width="stretch"):
+                    if jump_to_playlist_browser_for_playlist(int(row['playlist_id'])):
+                        st.rerun()
+                if row.get('upload_note'):
+                    st.caption(f"Notiz: {row['upload_note']}")
 
     tabs = st.tabs(["🎧 Top Songs", "🔥 Übergänge", "🧱 Blöcke", "🔁 Davor / Danach"])
 
@@ -8769,20 +9340,73 @@ elif menu == "Analyse Hub":
                     if shown == 0:
                         st.info("Keine Treffer.")
 
-                st.markdown("**2er-Kombinationen zum Song**")
-                found_pairs = 0
-                for combo_text, cnt in insights["pairs"]:
-                    if cnt >= min_count:
-                        render_count_row(
-                            combo_text,
-                            cnt,
-                            combo_type="2er",
-                            combo_text=combo_text,
-                            set_key=f"hub_song_pair_{combo_text}"
-                        )
-                        found_pairs += 1
-                if found_pairs == 0:
-                    st.info("Keine Treffer.")
+                combo_tabs = st.tabs(["2er", "3er", "4er", "5er", "Beweise"])
+                with combo_tabs[0]:
+                    st.markdown("**2er-Kombinationen zum Song**")
+                    found_pairs = 0
+                    for combo_text, cnt in insights["pairs"]:
+                        if cnt >= min_count:
+                            render_count_row(
+                                combo_text,
+                                cnt,
+                                combo_type="2er",
+                                combo_text=combo_text,
+                                set_key=f"hub_song_pair_{combo_text}"
+                            )
+                            found_pairs += 1
+                    if found_pairs == 0:
+                        st.info("Keine Treffer.")
+
+                def _render_song_combo_examples(rows, combo_type, prefix):
+                    if not rows:
+                        st.info("Keine Treffer.")
+                        return
+                    shown = 0
+                    for combo_text, cnt in rows:
+                        if cnt >= min_count:
+                            render_count_row(
+                                combo_text,
+                                cnt,
+                                combo_type=combo_type,
+                                combo_text=combo_text,
+                                set_key=f"{prefix}_{shown}"
+                            )
+                            shown += 1
+                    if shown == 0:
+                        st.info("Keine Treffer.")
+
+                with combo_tabs[1]:
+                    st.markdown("**3er-Blöcke ab diesem Song**")
+                    _render_song_combo_examples(insights.get("block3", []), "3er", "hub_song_block3")
+
+                with combo_tabs[2]:
+                    st.markdown("**4er-Blöcke ab diesem Song**")
+                    _render_song_combo_examples(insights.get("block4", []), "4er", "hub_song_block4")
+
+                with combo_tabs[3]:
+                    st.markdown("**5er-Blöcke ab diesem Song**")
+                    _render_song_combo_examples(insights.get("block5", []), "5er", "hub_song_block5")
+
+                with combo_tabs[4]:
+                    st.markdown("**Beweis-Playlists für diesen Song**")
+                    proof_rows = get_track_example_playlists(
+                        insights["display"],
+                        event=filter_event,
+                        source=filter_source,
+                        top_only=top_only,
+                        sub_event=filter_sub_event,
+                        limit=8,
+                    )
+                    if not proof_rows:
+                        st.info("Keine Beispiel-Playlists gefunden.")
+                    else:
+                        for row in proof_rows:
+                            cols = st.columns([4.5, 1.6, 1.2])
+                            cols[0].markdown(f"**{row['name']}**  \n{row['event_label']} | {row['source']}")
+                            cols[1].caption(str(row['created_at']))
+                            if cols[2].button("Öffnen", key=f"hub_track_proof_{row['playlist_id']}", width="stretch"):
+                                if jump_to_playlist_browser_for_playlist(int(row['playlist_id'])):
+                                    st.rerun()
 
 elif menu == "Vorbereitung":
     st.header("Vorbereitung")
@@ -8993,11 +9617,19 @@ elif menu == "Gemerkte Kombinationen":
     tag_filter = search_cols[3].selectbox("Tag", [""] + get_saved_combo_tags(), accept_new_options=True, key="memory_filter_tag")
     context_filter = search_cols[4].selectbox("Anlass / Einsatz", [""] + get_saved_combo_contexts(), accept_new_options=True, key="memory_filter_context")
 
+    search_cols_2 = st.columns([1, 1, 1])
+    source_filter = search_cols_2[0].selectbox("Quelle", [""] + get_saved_combo_sources(), accept_new_options=True, key="memory_filter_source")
+    genre_filter = search_cols_2[1].selectbox("Genre", [""] + get_saved_combo_genres(), accept_new_options=True, key="memory_filter_genre")
+    event_filter = search_cols_2[2].selectbox("Playlist-Event", [""] + get_saved_combo_events(), accept_new_options=True, key="memory_filter_event")
+
     combos = get_saved_combos(
         combo_type=combo_type_filter,
         category=category_filter,
         tag=tag_filter,
         usage_context=context_filter,
+        source_name=source_filter,
+        genre_name=genre_filter,
+        event_name=event_filter,
         query_text=query_text,
     )
 
@@ -9018,7 +9650,7 @@ elif menu == "Gemerkte Kombinationen":
             if not rows:
                 st.info("Keine Einträge in diesem Bereich.")
                 return
-            for combo_id, combo_type, combo_text, source_track, note, category, tags, usage_context, playlist_name, playlist_id, created_at in rows:
+            for combo_id, combo_type, combo_text, source_track, note, category, tags, usage_context, source_name, genre_name, event_name, playlist_name, playlist_id, created_at in rows:
                 with st.container(border=True):
                     top_cols = st.columns([5.5, 1.2, 1.2, 1.1])
                     title = f"**{combo_type}**"
@@ -9047,6 +9679,12 @@ elif menu == "Gemerkte Kombinationen":
                     meta_parts = []
                     if usage_context:
                         meta_parts.append(f"Anlass/Einsatz: {usage_context}")
+                    if event_name:
+                        meta_parts.append(f"Playlist-Event: {event_name}")
+                    if source_name:
+                        meta_parts.append(f"Quelle: {source_name}")
+                    if genre_name:
+                        meta_parts.append(f"Genre: {genre_name}")
                     if tags:
                         meta_parts.append(f"Tags: {tags}")
                     if playlist_name:
