@@ -1,0 +1,15 @@
+.git
+.gitignore
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.streamlit/secrets.toml
+*.db
+*.sqlite
+*.sqlite3
+*.zip
+backups/
+.DS_Store
