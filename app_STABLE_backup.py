@@ -47,8 +47,6 @@ import logging
 import time
 import socket
 import io
-import hashlib
-import uuid
 import base64
 import urllib.request
 import urllib.error
@@ -57,11 +55,11 @@ import urllib.parse
 warnings.filterwarnings("ignore")
 logging.getLogger("streamlit").setLevel(logging.ERROR)
 
-APP_VERSION = "DJ Tool V15 - Komfort & Speed"
-APP_SHORT_VERSION = "V15"
+APP_VERSION = "DJ Tool V15.2 - Hybrid Pro Max"
+APP_SHORT_VERSION = "V15.2"
 APP_BUILD_DATE = "2026-04-08"
-APP_BUILD_TIME = "11:10"
-APP_BUILD_SOURCE = "V14.2 stabil + Komfort/Speed/Start-Optimierung"
+APP_BUILD_TIME = "14:10"
+APP_BUILD_SOURCE = "V15 stabil + Hybrid Pro Max / Auto-Status / Sync-Status"
 APP_BASELINE_ID = "djtool_master_baseline_v1"
 LOGIN_ENABLED = True
 AUTO_LOGIN_TRUSTED_DEVICE = True
@@ -1759,7 +1757,9 @@ def restore_backup_from_bytes(backup_bytes: bytes):
         if "saved_sets.json" in names:
             with open(SET_FILE, "wb") as f:
                 f.write(zf.read("saved_sets.json"))
+    clear_runtime_caches()
     mark_learning_dirty("restore_backup_from_bytes")
+    st.session_state["last_restore_completed_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
 
 
 def maybe_auto_sync_latest_backup_to_dropbox(local_path: str, reason: str = "autosave") -> str:
@@ -1814,29 +1814,12 @@ def maybe_restore_from_dropbox_on_startup(force: bool = False) -> bool:
         st.session_state["dropbox_startup_restore_status"] = f"Dropbox Restore ok: {latest.get('name') or '-'}"
         st.session_state["dropbox_startup_restore_remote"] = remote_path
         st.session_state["dropbox_startup_restore_counts"] = f"{new_playlist_count} Playlists / {new_track_count} Tracks"
+        st.session_state["show_system_status_panel"] = True
+        st.session_state["auto_status_loaded"] = True
         return True
     except Exception as e:
         st.session_state["dropbox_startup_restore_status"] = f"Dropbox Restore fehlgeschlagen: {e}"
         return False
-
-
-def reset_live_database_files():
-    ok = True
-    try:
-        if Path(DB_PATH).exists():
-            Path(DB_PATH).unlink()
-    except Exception:
-        ok = False
-    try:
-        if Path(SET_FILE).exists():
-            Path(SET_FILE).unlink()
-    except Exception:
-        ok = False
-    if ok:
-        init_db()
-        mark_learning_dirty("reset_live_database")
-        auto_backup_after_data_change("reset_live_database")
-    return ok
 
 
 def get_runtime_device_name() -> str:
@@ -1990,22 +1973,43 @@ def maybe_periodic_sync_backup():
 
 def render_sync_guard_panel(p_count: int = 0, t_count: int = 0):
     if not get_dropbox_access_token():
+        st.info("Dropbox-Sync noch nicht aktiv.")
         return
     current_status = st.session_state.get("sync_guard_status") or acquire_sync_guard(p_count=p_count, t_count=t_count)
     remote = current_status.get("remote") or {}
     active_device = str(remote.get("device_name") or get_runtime_device_name())
     stamp = str(remote.get("updated_at") or "-")
-    owner_text = f"🔒 Aktiv: {active_device} · {stamp}"
+    runtime_label = "WEB" if str(remote.get("runtime") or "").lower() == "web" else "LOKAL"
+    owner_text = f"🔒 Aktiv: {active_device} ({runtime_label}) · {stamp}"
     if current_status.get("blocking"):
-        st.warning(owner_text)
+        st.error(owner_text)
+        st.warning("Dieses Gerät bitte nicht parallel mit dem anderen Gerät benutzen.")
         if st.button("🔓 Lock übernehmen", key="takeover_sync_guard_btn", width="stretch"):
             acquire_sync_guard(force=True, p_count=p_count, t_count=t_count)
             st.rerun()
     else:
         st.success(owner_text)
+    last_sync = str(st.session_state.get("last_dropbox_sync_path") or "").strip()
+    last_restore = str(st.session_state.get("last_restore_completed_at") or "").strip()
+    if last_sync:
+        st.caption(f"☁️ Letzter Dropbox-Sync: {Path(last_sync).name if '/' in last_sync else last_sync}")
+    if last_restore:
+        st.caption(f"♻️ Letztes Restore: {last_restore}")
     st.caption(f"Dieses Gerät: {get_runtime_device_name()} · Auto-Refresh {SYNC_AUTO_REFRESH_SECONDS}s")
-    if st.session_state.get("sync_guard_last_heartbeat_error"):
-        st.caption(f"Heartbeat: {st.session_state.get('sync_guard_last_heartbeat_error')}")
+
+
+def render_global_sync_status_bar(p_count: int = 0, t_count: int = 0):
+    if not get_dropbox_access_token():
+        return
+    status = st.session_state.get("sync_guard_status") or {}
+    remote = status.get("remote") or {}
+    active_device = str(remote.get("device_name") or get_runtime_device_name())
+    active_runtime = "WEB" if str(remote.get("runtime") or "").lower() == "web" else "LOKAL"
+    updated_at = str(remote.get("updated_at") or "-")
+    if status.get("blocking"):
+        st.error(f"⚠️ Aktuell arbeitet {active_device} ({active_runtime}) seit {updated_at}. Dieses Gerät bitte nicht parallel nutzen.")
+    else:
+        st.info(f"🔄 Sync aktiv · Gerät: {active_device} ({active_runtime}) · Stand: {updated_at} · Bestand: {p_count} Playlists / {t_count} Tracks")
 
 
 def inject_sync_auto_refresh():
@@ -2028,6 +2032,25 @@ def inject_sync_auto_refresh():
         """,
         height=0,
     )
+
+
+def reset_live_database_files():
+    ok = True
+    try:
+        if Path(DB_PATH).exists():
+            Path(DB_PATH).unlink()
+    except Exception:
+        ok = False
+    try:
+        if Path(SET_FILE).exists():
+            Path(SET_FILE).unlink()
+    except Exception:
+        ok = False
+    if ok:
+        init_db()
+        mark_learning_dirty("reset_live_database")
+        auto_backup_after_data_change("reset_live_database")
+    return ok
 
 
 def render_backup_restore_page():
@@ -7949,9 +7972,6 @@ def render_app_header():
     st.caption(f"Aktuelle Systemversion: {launcher_version} | aktualisiert am {APP_BUILD_DATE} {APP_BUILD_TIME} | Basis: {launcher_base}")
     st.caption(f"Core-Version: {APP_SHORT_VERSION}")
 
-maybe_restore_from_supabase_on_startup(force=False)
-maybe_restore_from_dropbox_on_startup(force=False)
-
 render_app_header()
 
 p_count, t_count, l_count, c_count = stats_counts()
@@ -7960,7 +7980,14 @@ refresh_sync_guard_heartbeat(p_count=p_count, t_count=t_count)
 maybe_periodic_sync_backup()
 inject_sync_auto_refresh()
 ensure_build_snapshot_backup()
-show_system_status_panel = bool(st.session_state.get("show_system_status_panel", get_ui_pref("show_system_status_panel", False)))
+render_global_sync_status_bar(p_count=p_count, t_count=t_count)
+auto_status_default = bool(
+    st.session_state.get("auto_status_loaded")
+    or os.environ.get("RENDER")
+    or os.environ.get("RENDER_SERVICE_ID")
+    or p_count <= 0
+)
+show_system_status_panel = bool(st.session_state.get("show_system_status_panel", get_ui_pref("show_system_status_panel", auto_status_default)))
 st.session_state["show_system_status_panel"] = show_system_status_panel
 status_cols = st.columns([4, 1.2])
 status_cols[0].caption(f"Live-Bestand: {p_count} Playlists • {t_count} Tracks • {c_count} gemerkte Kombis")
@@ -7976,11 +8003,11 @@ if show_system_status_panel:
         render_data_safety_status(p_count, t_count)
         render_release_guard_banner()
 else:
-    if status_cols[1].button("🧾 Status laden", key="show_system_status_btn", width="stretch"):
+    if status_cols[1].button("🧾 Status / Sync", key="show_system_status_btn", width="stretch"):
         st.session_state["show_system_status_panel"] = True
         update_ui_prefs(show_system_status_panel=True)
         st.rerun()
-    st.caption("System / Status bleibt für schnelleren Start ausgeblendet. Bei Bedarf oben laden.")
+    st.caption("System / Status bleibt für schnelleren Start ausgeblendet. Bei Bedarf oben öffnen.")
 
 
 SIMPLE_MENU_OPTIONS = [
