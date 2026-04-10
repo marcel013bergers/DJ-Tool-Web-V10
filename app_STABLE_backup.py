@@ -48,6 +48,8 @@ import time
 import socket
 import io
 import base64
+import hashlib
+import uuid
 import urllib.request
 import urllib.error
 import urllib.parse
